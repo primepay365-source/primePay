@@ -5,6 +5,16 @@ import {
   LogOut, ChevronLeft, ChevronRight, X, ExternalLink, MessageCircle,
 } from 'lucide-react'
 import logo from '../logo.png'
+import { useAuth } from '../auth/AuthContext'
+
+const businessRoles = ['SUPER_DISTRIBUTOR', 'MASTER_DISTRIBUTOR', 'DISTRIBUTOR', 'RETAILER']
+
+const networkLabels = {
+  ADMIN: 'All Accounts',
+  SUPER_DISTRIBUTOR: 'Master Distributors',
+  MASTER_DISTRIBUTOR: 'Distributors',
+  DISTRIBUTOR: 'Retailers',
+}
 
 const sections = [
   { items: [{ to: '/', label: 'Dashboard', icon: LayoutGrid }] },
@@ -15,7 +25,7 @@ const sections = [
       { to: '/reports', label: 'Reports', icon: BarChart3 },
     ],
   },
-  { title: 'NETWORK', items: [{ to: '/master-distributors', label: 'Master Distributors', icon: Users }] },
+  { title: 'NETWORK', items: [{ to: '/master-distributors', label: 'All Accounts', icon: Users }] },
   {
     title: 'ACCOUNT',
     items: [
@@ -32,6 +42,7 @@ const titles = {
   '/wallet': ['Wallet', 'Add funds, withdraw and track commissions.'],
   '/reports': ['Reports', 'Funds and commission statements'],
   '/master-distributors': ['Master Distributors', 'Master distributors onboarded by you'],
+  '/distributors/onboard': ['Create Distributor', 'Complete the distributor onboarding steps'],
   '/notifications': ['Notifications', 'Updates from admin and your account'],
   '/help': ['Help & Support', 'Raise and track issues with your transactions'],
   '/profile': ['Profile & Settings', 'Your account details and security'],
@@ -43,7 +54,20 @@ export default function Layout() {
   const [banner, setBanner] = useState(true)
   const { pathname } = useLocation()
   const navigate = useNavigate()
+  const { session, logout } = useAuth()
+  const account = session.account
   const [title, sub] = titles[pathname] || titles['/']
+  const canTransact = businessRoles.includes(account.role)
+  const visibleSections = sections
+    .map((section) => ({
+      ...section,
+      items: section.items
+        .filter(({ to }) => canTransact || (to !== '/wallet' && to !== '/reports'))
+        .map((item) => item.to === '/master-distributors'
+          ? { ...item, label: networkLabels[account.role] || 'My Network' }
+          : item),
+    }))
+    .filter((section) => section.items.length > 0)
 
   return (
     <div className="shell">
@@ -55,7 +79,7 @@ export default function Layout() {
           {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
         <nav className="nav">
-          {sections.map((s, i) => (
+          {visibleSections.map((s, i) => (
             <div key={i}>
               {s.title && <div className="nav-section">{s.title}</div>}
               {s.items.map(({ to, label, icon: Icon, badge }) => (
@@ -69,7 +93,7 @@ export default function Layout() {
           ))}
         </nav>
         <div className="logout">
-          <button onClick={() => navigate('/')}>
+          <button onClick={() => { logout(); navigate('/login', { replace: true }) }}>
             <LogOut size={20} />
             <span className="nav-label">Logout</span>
           </button>
@@ -97,10 +121,10 @@ export default function Layout() {
             <span className="dot">5</span>
           </button>
           <div className="user">
-            <div className="avatar">GS</div>
+            <div className="avatar">{account.displayName?.slice(0, 1)?.toUpperCase() || 'U'}</div>
             <div>
-              <div className="uname">GURRAM SOWMYA</div>
-              <div className="uid">PSSD01</div>
+              <div className="uname">{account.displayName}</div>
+              <div className="uid">{account.accountCode} · {account.role?.replaceAll('_', ' ')}</div>
             </div>
           </div>
         </header>

@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import { Pencil, Lock } from 'lucide-react'
+import { useAuth } from '../auth/AuthContext'
 
 export default function Profile() {
+  const { session } = useAuth()
+  const account = session.account
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState({
-    name: 'GURRAM SOWMYA',
-    mobile: '+91 87906 92463',
-    email: 'gurramsowmya1974@gmail.com',
+    name: account.displayName || 'Account User',
+    mobile: '',
+    email: '',
   })
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value })
 
@@ -21,10 +24,10 @@ export default function Profile() {
     <div className="profile-wrap">
       <div className="card">
         <div className="p-head">
-          <div className="avatar lg">GS</div>
+          <div className="avatar lg">{account.displayName?.slice(0, 1)?.toUpperCase() || 'U'}</div>
           <div className="info">
             <b>{form.name}</b>
-            <span>Super Distributor · PSSD01</span>
+            <span>{account.role?.replaceAll('_', ' ')} · {account.accountCode}</span>
           </div>
           <button className="btn" onClick={() => setEditing(!editing)}>
             <Pencil size={16} /> {editing ? 'Save' : 'Edit details'}

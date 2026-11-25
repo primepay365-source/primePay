@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.29.xsd">
+
+    <include file="001-create-agent-account.sql" relativeToChangelogFile="true"/>
+    <include file="001-create-agent-account-h2.sql" relativeToChangelogFile="true"/>
+    <include file="002-create-account-user-h2.sql" relativeToChangelogFile="true"/>
+    <include file="002-create-account-user-oracle.sql" relativeToChangelogFile="true"/>
+    <include file="003-create-distributor-onboarding-h2.sql" relativeToChangelogFile="true"/>
+    <include file="003-create-distributor-onboarding-oracle.sql" relativeToChangelogFile="true"/>
+</databaseChangeLog>
