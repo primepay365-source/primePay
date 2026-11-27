@@ -1,0 +1,309 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PrimePay core platform schema (users status/profile, audit, notifications, wallet, ledger,
+  transactions, commission, limits, services, OTP). Generic Liquibase types so the same changeset
+  runs on Oracle (NUMBER/VARCHAR2/TIMESTAMP WITH TIME ZONE) and on the H2 dev database.
+  Money columns are NUMERIC(19,2) -> Oracle NUMBER(19,2). Never FLOAT/DOUBLE.
+-->
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.29.xsd">
+
+    <property name="money" value="NUMERIC(19,2)"/>
+    <property name="ts" value="TIMESTAMP WITH TIME ZONE"/>
+
+    <!-- ===== Identity: status, profile, lockout ===== -->
+    <changeSet id="005-01-account-status-profile" author="primepay">
+        <addColumn tableName="agent_account">
+            <column name="status" type="VARCHAR(30)" defaultValue="ACTIVE"><constraints nullable="false"/></column>
+            <column name="email" type="VARCHAR(160)"/>
+            <column name="mobile" type="VARCHAR(20)"/>
+            <column name="business_name" type="VARCHAR(160)"/>
+            <column name="address" type="VARCHAR(500)"/>
+        </addColumn>
+        <sql>ALTER TABLE agent_account ADD CONSTRAINT ck_agent_account_status CHECK (status IN ('DRAFT','PENDING_VERIFICATION','PENDING_APPROVAL','APPROVED','REJECTED','SUSPENDED','ACTIVE','INACTIVE'))</sql>
+        <createIndex tableName="agent_account" indexName="ix_agent_account_status"><column name="status"/></createIndex>
+    </changeSet>
+
+    <changeSet id="005-02-user-lockout" author="primepay">
+        <addColumn tableName="account_user">
+            <column name="failed_attempts" type="INT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+            <column name="locked_until" type="${ts}"/>
+            <column name="password_changed_at" type="${ts}"/>
+            <column name="last_login_at" type="${ts}"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="005-03-onboarding-decision" author="primepay">
+        <addColumn tableName="distributor_onboarding">
+            <column name="decided_by_account_id" type="BIGINT"/>
+            <column name="decided_at" type="${ts}"/>
+            <column name="decision_note" type="VARCHAR(500)"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="005-04-status-history" author="primepay">
+        <createTable tableName="pp_user_status_history">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_user_status_history"/></column>
+            <column name="account_id" type="BIGINT"><constraints nullable="false" foreignKeyName="fk_pp_ush_account" references="agent_account(id)"/></column>
+            <column name="from_status" type="VARCHAR(30)"/>
+            <column name="to_status" type="VARCHAR(30)"><constraints nullable="false"/></column>
+            <column name="reason" type="VARCHAR(500)"/>
+            <column name="changed_by_account_id" type="BIGINT"/>
+            <column name="changed_at" type="${ts}"><constraints nullable="false"/></column>
+        </createTable>
+        <createIndex tableName="pp_user_status_history" indexName="ix_pp_ush_account"><column name="account_id"/><column name="changed_at"/></createIndex>
+    </changeSet>
+
+    <!-- ===== Audit and notifications ===== -->
+    <changeSet id="005-05-audit" author="primepay">
+        <createTable tableName="pp_audit_logs">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_audit_logs"/></column>
+            <column name="occurred_at" type="${ts}"><constraints nullable="false"/></column>
+            <column name="actor_account_id" type="BIGINT"/>
+            <column name="actor_label" type="VARCHAR(160)"/>
+            <column name="action" type="VARCHAR(60)"><constraints nullable="false"/></column>
+            <column name="target_type" type="VARCHAR(40)"/>
+            <column name="target_id" type="VARCHAR(80)"/>
+            <column name="result" type="VARCHAR(20)"><constraints nullable="false"/></column>
+            <column name="detail" type="VARCHAR(4000)"/>
+            <column name="ip_address" type="VARCHAR(64)"/>
+            <column name="request_id" type="VARCHAR(64)"/>
+        </createTable>
+        <createIndex tableName="pp_audit_logs" indexName="ix_pp_audit_time"><column name="occurred_at"/></createIndex>
+        <createIndex tableName="pp_audit_logs" indexName="ix_pp_audit_actor"><column name="actor_account_id"/></createIndex>
+    </changeSet>
+
+    <changeSet id="005-06-notifications" author="primepay">
+        <createTable tableName="pp_notifications">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_notifications"/></column>
+            <column name="account_id" type="BIGINT"><constraints nullable="false" foreignKeyName="fk_pp_notif_account" references="agent_account(id)"/></column>
+            <column name="category" type="VARCHAR(20)"><constraints nullable="false"/></column>
+            <column name="title" type="VARCHAR(160)"><constraints nullable="false"/></column>
+            <column name="body" type="VARCHAR(1000)"><constraints nullable="false"/></column>
+            <column name="link" type="VARCHAR(200)"/>
+            <column name="channels" type="VARCHAR(40)"/>
+            <column name="read_at" type="${ts}"/>
+            <column name="created_at" type="${ts}"><constraints nullable="false"/></column>
+        </createTable>
+        <createIndex tableName="pp_notifications" indexName="ix_pp_notif_account"><column name="account_id"/><column name="created_at"/></createIndex>
+    </changeSet>
+
+    <changeSet id="005-07-otp" author="primepay">
+        <createTable tableName="pp_otp_verifications">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_otp"/></column>
+            <column name="account_id" type="BIGINT"><constraints nullable="false" foreignKeyName="fk_pp_otp_account" references="agent_account(id)"/></column>
+            <column name="purpose" type="VARCHAR(30)"><constraints nullable="false"/></column>
+            <column name="code_hash" type="VARCHAR(100)"><constraints nullable="false"/></column>
+            <column name="attempts" type="INT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+            <column name="expires_at" type="${ts}"><constraints nullable="false"/></column>
+            <column name="consumed_at" type="${ts}"/>
+            <column name="created_at" type="${ts}"><constraints nullable="false"/></column>
+        </createTable>
+        <createIndex tableName="pp_otp_verifications" indexName="ix_pp_otp_account"><column name="account_id"/><column name="purpose"/></createIndex>
+    </changeSet>
+
+    <!-- ===== Services ===== -->
+    <changeSet id="005-08-services" author="primepay">
+        <createTable tableName="pp_service_master">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_service_master"/></column>
+            <column name="service_code" type="VARCHAR(30)"><constraints nullable="false" unique="true" uniqueConstraintName="uq_pp_service_code"/></column>
+            <column name="name" type="VARCHAR(80)"><constraints nullable="false"/></column>
+            <column name="fee_amount" type="${money}" defaultValueNumeric="0"><constraints nullable="false"/></column>
+            <column name="enabled" type="BOOLEAN" defaultValueBoolean="true"><constraints nullable="false"/></column>
+            <column name="provider" type="VARCHAR(80)"/>
+        </createTable>
+        <insert tableName="pp_service_master"><column name="service_code" value="WALLET_LOAD"/><column name="name" value="Wallet load"/><column name="fee_amount" valueNumeric="0"/><column name="enabled" valueBoolean="true"/><column name="provider" value="Manual bank transfer (admin approval)"/></insert>
+        <insert tableName="pp_service_master"><column name="service_code" value="WALLET_TRANSFER"/><column name="name" value="Wallet transfer"/><column name="fee_amount" valueNumeric="0"/><column name="enabled" valueBoolean="true"/><column name="provider" value="Internal ledger"/></insert>
+        <insert tableName="pp_service_master"><column name="service_code" value="PAYOUT"/><column name="name" value="Bank payout"/><column name="fee_amount" valueNumeric="10.00"/><column name="enabled" valueBoolean="true"/><column name="provider" value="Mock payout adapter (simulated)"/></insert>
+    </changeSet>
+
+    <!-- ===== Wallet, transactions, ledger ===== -->
+    <changeSet id="005-09-wallets" author="primepay">
+        <createTable tableName="pp_wallets">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_wallets"/></column>
+            <column name="wallet_code" type="VARCHAR(40)"><constraints nullable="false" unique="true" uniqueConstraintName="uq_pp_wallet_code"/></column>
+            <column name="account_id" type="BIGINT"><constraints nullable="false" unique="true" uniqueConstraintName="uq_pp_wallet_account" foreignKeyName="fk_pp_wallet_account" references="agent_account(id)"/></column>
+            <column name="available_balance" type="${money}" defaultValueNumeric="0"><constraints nullable="false"/></column>
+            <column name="blocked_balance" type="${money}" defaultValueNumeric="0"><constraints nullable="false"/></column>
+            <column name="total_credit" type="${money}" defaultValueNumeric="0"><constraints nullable="false"/></column>
+            <column name="total_debit" type="${money}" defaultValueNumeric="0"><constraints nullable="false"/></column>
+            <column name="status" type="VARCHAR(20)" defaultValue="ACTIVE"><constraints nullable="false"/></column>
+            <column name="created_at" type="${ts}"><constraints nullable="false"/></column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+        </createTable>
+        <sql>ALTER TABLE pp_wallets ADD CONSTRAINT ck_pp_wallet_nonneg CHECK (available_balance &gt;= 0 AND blocked_balance &gt;= 0)</sql>
+    </changeSet>
+
+    <changeSet id="005-10-transactions" author="primepay">
+        <createSequence sequenceName="pp_txn_ref_seq" startValue="1000" incrementBy="1"/>
+        <createTable tableName="pp_transactions">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_transactions"/></column>
+            <column name="reference_no" type="VARCHAR(30)"><constraints nullable="false" unique="true" uniqueConstraintName="uq_pp_txn_reference"/></column>
+            <column name="txn_type" type="VARCHAR(20)"><constraints nullable="false"/></column>
+            <column name="status" type="VARCHAR(20)"><constraints nullable="false"/></column>
+            <column name="service_code" type="VARCHAR(30)"><constraints nullable="false"/></column>
+            <column name="initiator_account_id" type="BIGINT"><constraints nullable="false" foreignKeyName="fk_pp_txn_initiator" references="agent_account(id)"/></column>
+            <column name="source_account_id" type="BIGINT"/>
+            <column name="target_account_id" type="BIGINT"/>
+            <column name="amount" type="${money}"><constraints nullable="false"/></column>
+            <column name="fee" type="${money}" defaultValueNumeric="0"><constraints nullable="false"/></column>
+            <column name="idempotency_key" type="VARCHAR(80)"/>
+            <column name="request_hash" type="VARCHAR(64)"/>
+            <column name="original_txn_id" type="BIGINT"/>
+            <column name="remarks" type="VARCHAR(300)"/>
+            <column name="external_ref" type="VARCHAR(80)"/>
+            <column name="payout_mode" type="VARCHAR(10)"/>
+            <column name="beneficiary_name" type="VARCHAR(160)"/>
+            <column name="beneficiary_account_last4" type="VARCHAR(4)"/>
+            <column name="beneficiary_ifsc" type="VARCHAR(11)"/>
+            <column name="beneficiary_bank" type="VARCHAR(120)"/>
+            <column name="failure_reason" type="VARCHAR(300)"/>
+            <column name="decided_by_account_id" type="BIGINT"/>
+            <column name="created_at" type="${ts}"><constraints nullable="false"/></column>
+            <column name="updated_at" type="${ts}"><constraints nullable="false"/></column>
+            <column name="version" type="BIGINT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+        </createTable>
+        <addUniqueConstraint tableName="pp_transactions" columnNames="initiator_account_id, idempotency_key" constraintName="uq_pp_txn_idempotency"/>
+        <sql>ALTER TABLE pp_transactions ADD CONSTRAINT ck_pp_txn_amount CHECK (amount &gt; 0 AND fee &gt;= 0)</sql>
+        <sql>ALTER TABLE pp_transactions ADD CONSTRAINT ck_pp_txn_status CHECK (status IN ('INITIATED','PENDING','SUCCESS','FAILED','REVERSED','REFUNDED'))</sql>
+        <createIndex tableName="pp_transactions" indexName="ix_pp_txn_created"><column name="created_at"/></createIndex>
+        <createIndex tableName="pp_transactions" indexName="ix_pp_txn_initiator"><column name="initiator_account_id"/><column name="created_at"/></createIndex>
+        <createIndex tableName="pp_transactions" indexName="ix_pp_txn_status"><column name="status"/></createIndex>
+    </changeSet>
+
+    <changeSet id="005-11-ledger" author="primepay">
+        <createTable tableName="pp_wallet_ledger">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_wallet_ledger"/></column>
+            <column name="entry_ref" type="VARCHAR(40)"><constraints nullable="false" unique="true" uniqueConstraintName="uq_pp_ledger_ref"/></column>
+            <column name="wallet_id" type="BIGINT"><constraints nullable="false" foreignKeyName="fk_pp_ledger_wallet" references="pp_wallets(id)"/></column>
+            <column name="transaction_id" type="BIGINT"><constraints nullable="false" foreignKeyName="fk_pp_ledger_txn" references="pp_transactions(id)"/></column>
+            <column name="direction" type="VARCHAR(2)"><constraints nullable="false"/></column>
+            <column name="entry_type" type="VARCHAR(30)"><constraints nullable="false"/></column>
+            <column name="amount" type="${money}"><constraints nullable="false"/></column>
+            <column name="balance_before" type="${money}"><constraints nullable="false"/></column>
+            <column name="balance_after" type="${money}"><constraints nullable="false"/></column>
+            <column name="description" type="VARCHAR(300)"/>
+            <column name="created_at" type="${ts}"><constraints nullable="false"/></column>
+        </createTable>
+        <sql>ALTER TABLE pp_wallet_ledger ADD CONSTRAINT ck_pp_ledger_dir CHECK (direction IN ('DR','CR') AND amount &gt; 0)</sql>
+        <createIndex tableName="pp_wallet_ledger" indexName="ix_pp_ledger_wallet"><column name="wallet_id"/><column name="created_at"/></createIndex>
+        <createIndex tableName="pp_wallet_ledger" indexName="ix_pp_ledger_txn"><column name="transaction_id"/></createIndex>
+    </changeSet>
+
+    <changeSet id="005-12-txn-history" author="primepay">
+        <createTable tableName="pp_transaction_status_history">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_txn_history"/></column>
+            <column name="transaction_id" type="BIGINT"><constraints nullable="false" foreignKeyName="fk_pp_txh_txn" references="pp_transactions(id)"/></column>
+            <column name="from_status" type="VARCHAR(20)"/>
+            <column name="to_status" type="VARCHAR(20)"><constraints nullable="false"/></column>
+            <column name="note" type="VARCHAR(300)"/>
+            <column name="changed_by_account_id" type="BIGINT"/>
+            <column name="changed_at" type="${ts}"><constraints nullable="false"/></column>
+        </createTable>
+        <createIndex tableName="pp_transaction_status_history" indexName="ix_pp_txh_txn"><column name="transaction_id"/></createIndex>
+    </changeSet>
+
+    <changeSet id="005-13-adjustments" author="primepay">
+        <createTable tableName="pp_wallet_adjustments">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_adjustments"/></column>
+            <column name="request_ref" type="VARCHAR(30)"><constraints nullable="false" unique="true" uniqueConstraintName="uq_pp_adj_ref"/></column>
+            <column name="account_id" type="BIGINT"><constraints nullable="false" foreignKeyName="fk_pp_adj_account" references="agent_account(id)"/></column>
+            <column name="direction" type="VARCHAR(2)"><constraints nullable="false"/></column>
+            <column name="amount" type="${money}"><constraints nullable="false"/></column>
+            <column name="reason" type="VARCHAR(80)"><constraints nullable="false"/></column>
+            <column name="details" type="VARCHAR(500)"/>
+            <column name="status" type="VARCHAR(20)"><constraints nullable="false"/></column>
+            <column name="requested_by_account_id" type="BIGINT"><constraints nullable="false"/></column>
+            <column name="decided_by_account_id" type="BIGINT"/>
+            <column name="decided_at" type="${ts}"/>
+            <column name="transaction_id" type="BIGINT"/>
+            <column name="created_at" type="${ts}"><constraints nullable="false"/></column>
+        </createTable>
+        <sql>ALTER TABLE pp_wallet_adjustments ADD CONSTRAINT ck_pp_adj_maker_checker CHECK (decided_by_account_id IS NULL OR decided_by_account_id &lt;&gt; requested_by_account_id)</sql>
+    </changeSet>
+
+    <!-- ===== Commission ===== -->
+    <changeSet id="005-14-commission" author="primepay">
+        <createTable tableName="pp_commission_rules">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_comm_rules"/></column>
+            <column name="rule_code" type="VARCHAR(30)"><constraints nullable="false" unique="true" uniqueConstraintName="uq_pp_comm_rule_code"/></column>
+            <column name="service_code" type="VARCHAR(30)"><constraints nullable="false"/></column>
+            <column name="calc_type" type="VARCHAR(10)"><constraints nullable="false"/></column>
+            <column name="slab_from" type="${money}"/>
+            <column name="slab_to" type="${money}"/>
+            <column name="effective_from" type="TIMESTAMP"><constraints nullable="false"/></column>
+            <column name="effective_to" type="TIMESTAMP"/>
+            <column name="status" type="VARCHAR(10)"><constraints nullable="false"/></column>
+            <column name="created_by_account_id" type="BIGINT"/>
+            <column name="created_at" type="${ts}"><constraints nullable="false"/></column>
+        </createTable>
+        <createTable tableName="pp_commission_distribution">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_comm_dist"/></column>
+            <column name="rule_id" type="BIGINT"><constraints nullable="false" foreignKeyName="fk_pp_cd_rule" references="pp_commission_rules(id)"/></column>
+            <column name="level_role" type="VARCHAR(30)"><constraints nullable="false"/></column>
+            <column name="rate" type="NUMERIC(9,6)"/>
+            <column name="fixed_amount" type="${money}"/>
+            <column name="min_amount" type="${money}"/>
+            <column name="max_amount" type="${money}"/>
+        </createTable>
+        <addUniqueConstraint tableName="pp_commission_distribution" columnNames="rule_id, level_role" constraintName="uq_pp_cd_rule_level"/>
+        <createTable tableName="pp_commission_transactions">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_comm_txn"/></column>
+            <column name="source_txn_id" type="BIGINT"><constraints nullable="false" foreignKeyName="fk_pp_ct_source" references="pp_transactions(id)"/></column>
+            <column name="credit_txn_id" type="BIGINT"/>
+            <column name="rule_id" type="BIGINT"><constraints nullable="false"/></column>
+            <column name="earner_account_id" type="BIGINT"/>
+            <column name="level_role" type="VARCHAR(30)"><constraints nullable="false"/></column>
+            <column name="base_amount" type="${money}"><constraints nullable="false"/></column>
+            <column name="commission_amount" type="${money}"><constraints nullable="false"/></column>
+            <column name="status" type="VARCHAR(20)"><constraints nullable="false"/></column>
+            <column name="created_at" type="${ts}"><constraints nullable="false"/></column>
+        </createTable>
+        <createIndex tableName="pp_commission_transactions" indexName="ix_pp_ct_earner"><column name="earner_account_id"/><column name="created_at"/></createIndex>
+        <createIndex tableName="pp_commission_transactions" indexName="ix_pp_ct_source"><column name="source_txn_id"/></createIndex>
+    </changeSet>
+
+    <changeSet id="005-15-commission-seed" author="primepay">
+        <comment>Example rule from the requirements (illustrative rates; change them in the Commission screen)</comment>
+        <insert tableName="pp_commission_rules"><column name="rule_code" value="CR-PAYOUT-01"/><column name="service_code" value="PAYOUT"/><column name="calc_type" value="PERCENT"/><column name="effective_from" valueDate="2026-01-01"/><column name="status" value="ACTIVE"/><column name="created_at" valueDate="2026-01-01T00:00:00"/></insert>
+        <sql>INSERT INTO pp_commission_distribution (rule_id, level_role, rate, min_amount, max_amount) SELECT id, 'RETAILER', 0.10, 0.01, 500 FROM pp_commission_rules WHERE rule_code = 'CR-PAYOUT-01'</sql>
+        <sql>INSERT INTO pp_commission_distribution (rule_id, level_role, rate, min_amount, max_amount) SELECT id, 'DISTRIBUTOR', 0.20, 0.01, 500 FROM pp_commission_rules WHERE rule_code = 'CR-PAYOUT-01'</sql>
+        <sql>INSERT INTO pp_commission_distribution (rule_id, level_role, rate, min_amount, max_amount) SELECT id, 'MASTER_DISTRIBUTOR', 0.15, 0.01, 500 FROM pp_commission_rules WHERE rule_code = 'CR-PAYOUT-01'</sql>
+        <sql>INSERT INTO pp_commission_distribution (rule_id, level_role, rate, min_amount, max_amount) SELECT id, 'SUPER_DISTRIBUTOR', 0.10, 0.01, 500 FROM pp_commission_rules WHERE rule_code = 'CR-PAYOUT-01'</sql>
+        <sql>INSERT INTO pp_commission_distribution (rule_id, level_role, rate, min_amount, max_amount) SELECT id, 'PLATFORM', 0.05, 0.01, 500 FROM pp_commission_rules WHERE rule_code = 'CR-PAYOUT-01'</sql>
+    </changeSet>
+
+    <!-- ===== Velocity limits ===== -->
+    <changeSet id="005-16-limits" author="primepay">
+        <createTable tableName="pp_transaction_limits">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_limits"/></column>
+            <column name="scope" type="VARCHAR(10)"><constraints nullable="false"/></column>
+            <column name="role_code" type="VARCHAR(30)"/>
+            <column name="account_id" type="BIGINT"/>
+            <column name="service_code" type="VARCHAR(30)"><constraints nullable="false"/></column>
+            <column name="min_txn" type="${money}"><constraints nullable="false"/></column>
+            <column name="max_txn" type="${money}"><constraints nullable="false"/></column>
+            <column name="daily_amount" type="${money}"><constraints nullable="false"/></column>
+            <column name="monthly_amount" type="${money}"><constraints nullable="false"/></column>
+            <column name="daily_count" type="INT"><constraints nullable="false"/></column>
+            <column name="monthly_count" type="INT"><constraints nullable="false"/></column>
+            <column name="valid_until" type="TIMESTAMP"/>
+            <column name="set_by_account_id" type="BIGINT"/>
+            <column name="updated_at" type="${ts}"><constraints nullable="false"/></column>
+        </createTable>
+        <addUniqueConstraint tableName="pp_transaction_limits" columnNames="scope, role_code, account_id, service_code" constraintName="uq_pp_limits_scope"/>
+    </changeSet>
+
+    <changeSet id="005-17-limits-seed" author="primepay">
+        <comment>Role defaults from the design (illustrative; editable in the Limits screen)</comment>
+        <sql>INSERT INTO pp_transaction_limits (scope, role_code, service_code, min_txn, max_txn, daily_amount, monthly_amount, daily_count, monthly_count, updated_at) VALUES ('ROLE','SUPER_DISTRIBUTOR','WALLET_TRANSFER',100,1000000,20000000,400000000,5000,120000,CURRENT_TIMESTAMP)</sql>
+        <sql>INSERT INTO pp_transaction_limits (scope, role_code, service_code, min_txn, max_txn, daily_amount, monthly_amount, daily_count, monthly_count, updated_at) VALUES ('ROLE','MASTER_DISTRIBUTOR','WALLET_TRANSFER',100,500000,5000000,100000000,2000,50000,CURRENT_TIMESTAMP)</sql>
+        <sql>INSERT INTO pp_transaction_limits (scope, role_code, service_code, min_txn, max_txn, daily_amount, monthly_amount, daily_count, monthly_count, updated_at) VALUES ('ROLE','DISTRIBUTOR','WALLET_TRANSFER',100,200000,1000000,20000000,1000,25000,CURRENT_TIMESTAMP)</sql>
+        <sql>INSERT INTO pp_transaction_limits (scope, role_code, service_code, min_txn, max_txn, daily_amount, monthly_amount, daily_count, monthly_count, updated_at) VALUES ('ROLE','RETAILER','PAYOUT',100,50000,200000,4000000,200,5000,CURRENT_TIMESTAMP)</sql>
+        <sql>INSERT INTO pp_transaction_limits (scope, role_code, service_code, min_txn, max_txn, daily_amount, monthly_amount, daily_count, monthly_count, updated_at) VALUES ('ROLE','SUPER_DISTRIBUTOR','WALLET_LOAD',1000,10000000,50000000,1000000000,50,1000,CURRENT_TIMESTAMP)</sql>
+        <sql>INSERT INTO pp_transaction_limits (scope, role_code, service_code, min_txn, max_txn, daily_amount, monthly_amount, daily_count, monthly_count, updated_at) VALUES ('ROLE','MASTER_DISTRIBUTOR','WALLET_LOAD',1000,5000000,20000000,400000000,50,1000,CURRENT_TIMESTAMP)</sql>
+    </changeSet>
+</databaseChangeLog>

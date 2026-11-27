@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Retailer services from the PAYSWITCH overview: bill payment (credit cards), add funds through a payment
+  gateway (pay-in), and withdraw funds to saved, verified bank accounts (pay-out). All money moves through
+  the main wallet and the existing ledger. Charges and limits below are illustrative seed values that the
+  Platform Admin can change.
+-->
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.29.xsd">
+
+    <property name="money" value="NUMERIC(19,2)"/>
+    <property name="ts" value="TIMESTAMP WITH TIME ZONE"/>
+
+    <changeSet id="006-01-services" author="primepay">
+        <insert tableName="pp_service_master"><column name="service_code" value="BILL_PAYMENT"/><column name="name" value="Bill payment"/><column name="fee_amount" valueNumeric="5.00"/><column name="enabled" valueBoolean="true"/><column name="provider" value="Mock bill payment adapter (simulated)"/></insert>
+        <insert tableName="pp_service_master"><column name="service_code" value="ADD_FUNDS"/><column name="name" value="Add funds (pay-in)"/><column name="fee_amount" valueNumeric="0"/><column name="enabled" valueBoolean="true"/><column name="provider" value="Mock payment gateway (simulated); charge % set per gateway category"/></insert>
+        <update tableName="pp_service_master"><column name="name" value="Withdraw funds (payout)"/><where>service_code = 'PAYOUT'</where></update>
+    </changeSet>
+
+    <changeSet id="006-02-txn-columns" author="primepay">
+        <addColumn tableName="pp_transactions">
+            <column name="biller_name" type="VARCHAR(120)"/>
+            <column name="customer_name" type="VARCHAR(160)"/>
+            <column name="card_last4" type="VARCHAR(4)"/>
+            <column name="card_network" type="VARCHAR(20)"/>
+            <column name="gateway_category" type="VARCHAR(20)"/>
+            <column name="customer_mobile_masked" type="VARCHAR(20)"/>
+        </addColumn>
+    </changeSet>
+
+    <!-- ===== Bill payment ===== -->
+    <changeSet id="006-03-billers" author="primepay">
+        <createTable tableName="pp_billers">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_billers"/></column>
+            <column name="category" type="VARCHAR(30)"><constraints nullable="false"/></column>
+            <column name="biller_code" type="VARCHAR(30)"><constraints nullable="false" unique="true" uniqueConstraintName="uq_pp_biller_code"/></column>
+            <column name="name" type="VARCHAR(120)"><constraints nullable="false"/></column>
+            <column name="enabled" type="BOOLEAN" defaultValueBoolean="true"><constraints nullable="false"/></column>
+        </createTable>
+        <sql>INSERT INTO pp_billers (category, biller_code, name, enabled) VALUES ('CREDIT_CARD','CC-HDFC','HDFC Bank Credit Card',TRUE)</sql>
+        <sql>INSERT INTO pp_billers (category, biller_code, name, enabled) VALUES ('CREDIT_CARD','CC-ICICI','ICICI Bank Credit Card',TRUE)</sql>
+        <sql>INSERT INTO pp_billers (category, biller_code, name, enabled) VALUES ('CREDIT_CARD','CC-SBI','SBI Card',TRUE)</sql>
+        <sql>INSERT INTO pp_billers (category, biller_code, name, enabled) VALUES ('CREDIT_CARD','CC-AXIS','Axis Bank Credit Card',TRUE)</sql>
+        <sql>INSERT INTO pp_billers (category, biller_code, name, enabled) VALUES ('CREDIT_CARD','CC-KOTAK','Kotak Mahindra Bank Credit Card',TRUE)</sql>
+        <sql>INSERT INTO pp_billers (category, biller_code, name, enabled) VALUES ('CREDIT_CARD','CC-IDFC','IDFC FIRST Bank Credit Card',TRUE)</sql>
+        <sql>INSERT INTO pp_billers (category, biller_code, name, enabled) VALUES ('CREDIT_CARD','CC-AU','AU Small Finance Bank Credit Card',TRUE)</sql>
+        <sql>INSERT INTO pp_billers (category, biller_code, name, enabled) VALUES ('CREDIT_CARD','CC-RBL','RBL Bank Credit Card',TRUE)</sql>
+    </changeSet>
+
+    <changeSet id="006-04-bill-fetches" author="primepay">
+        <createTable tableName="pp_bill_fetches">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_bill_fetches"/></column>
+            <column name="fetch_ref" type="VARCHAR(40)"><constraints nullable="false" unique="true" uniqueConstraintName="uq_pp_bill_fetch_ref"/></column>
+            <column name="account_id" type="BIGINT"><constraints nullable="false" foreignKeyName="fk_pp_bf_account" references="agent_account(id)"/></column>
+            <column name="biller_id" type="BIGINT"><constraints nullable="false" foreignKeyName="fk_pp_bf_biller" references="pp_billers(id)"/></column>
+            <column name="card_last4" type="VARCHAR(4)"><constraints nullable="false"/></column>
+            <column name="mobile_masked" type="VARCHAR(20)"><constraints nullable="false"/></column>
+            <column name="customer_name" type="VARCHAR(160)"><constraints nullable="false"/></column>
+            <column name="total_due" type="${money}"><constraints nullable="false"/></column>
+            <column name="minimum_due" type="${money}"><constraints nullable="false"/></column>
+            <column name="due_date" type="TIMESTAMP"/>
+            <column name="provider_ref" type="VARCHAR(60)"/>
+            <column name="created_at" type="${ts}"><constraints nullable="false"/></column>
+            <column name="expires_at" type="${ts}"><constraints nullable="false"/></column>
+        </createTable>
+        <createIndex tableName="pp_bill_fetches" indexName="ix_pp_bf_account"><column name="account_id"/></createIndex>
+    </changeSet>
+
+    <!-- ===== Add funds (payment gateway) ===== -->
+    <changeSet id="006-05-gateway-categories" author="primepay">
+        <createTable tableName="pp_gateway_categories">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_gateway_categories"/></column>
+            <column name="code" type="VARCHAR(20)"><constraints nullable="false" unique="true" uniqueConstraintName="uq_pp_gateway_cat_code"/></column>
+            <column name="name" type="VARCHAR(80)"><constraints nullable="false"/></column>
+            <column name="min_amount" type="${money}"><constraints nullable="false"/></column>
+            <column name="max_amount" type="${money}"><constraints nullable="false"/></column>
+            <column name="charge_percent" type="NUMERIC(9,6)"><constraints nullable="false"/></column>
+            <column name="enabled" type="BOOLEAN" defaultValueBoolean="true"><constraints nullable="false"/></column>
+        </createTable>
+        <sql>INSERT INTO pp_gateway_categories (code, name, min_amount, max_amount, charge_percent, enabled) VALUES ('ECOM','E-commerce',100,100000,1.200000,TRUE)</sql>
+        <sql>INSERT INTO pp_gateway_categories (code, name, min_amount, max_amount, charge_percent, enabled) VALUES ('EDU','Education',100,200000,0.900000,TRUE)</sql>
+        <sql>INSERT INTO pp_gateway_categories (code, name, min_amount, max_amount, charge_percent, enabled) VALUES ('TRAVEL','Travel',100,50000,1.500000,TRUE)</sql>
+    </changeSet>
+
+    <changeSet id="006-06-payment-sessions" author="primepay">
+        <createTable tableName="pp_payment_sessions">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_payment_sessions"/></column>
+            <column name="session_ref" type="VARCHAR(40)"><constraints nullable="false" unique="true" uniqueConstraintName="uq_pp_ps_ref"/></column>
+            <column name="account_id" type="BIGINT"><constraints nullable="false" foreignKeyName="fk_pp_ps_account" references="agent_account(id)"/></column>
+            <column name="category_code" type="VARCHAR(20)"><constraints nullable="false"/></column>
+            <column name="card_network" type="VARCHAR(20)"><constraints nullable="false"/></column>
+            <column name="card_holder" type="VARCHAR(160)"><constraints nullable="false"/></column>
+            <column name="card_last4" type="VARCHAR(4)"/>
+            <column name="payment_mode" type="VARCHAR(10)"/>
+            <column name="upi_masked" type="VARCHAR(80)"/>
+            <column name="amount" type="${money}"><constraints nullable="false"/></column>
+            <column name="charge" type="${money}"><constraints nullable="false"/></column>
+            <column name="net_amount" type="${money}"><constraints nullable="false"/></column>
+            <column name="otp_hash" type="VARCHAR(100)"/>
+            <column name="otp_attempts" type="INT" defaultValueNumeric="0"><constraints nullable="false"/></column>
+            <column name="status" type="VARCHAR(20)"><constraints nullable="false"/></column>
+            <column name="failure_reason" type="VARCHAR(200)"/>
+            <column name="gateway_ref" type="VARCHAR(60)"/>
+            <column name="transaction_id" type="BIGINT"/>
+            <column name="created_at" type="${ts}"><constraints nullable="false"/></column>
+            <column name="expires_at" type="${ts}"><constraints nullable="false"/></column>
+        </createTable>
+        <createIndex tableName="pp_payment_sessions" indexName="ix_pp_ps_account"><column name="account_id"/></createIndex>
+    </changeSet>
+
+    <!-- ===== Withdraw funds: saved bank accounts ===== -->
+    <changeSet id="006-07-beneficiaries" author="primepay">
+        <createTable tableName="pp_beneficiaries">
+            <column name="id" type="BIGINT" autoIncrement="true"><constraints primaryKey="true" primaryKeyName="pk_pp_beneficiaries"/></column>
+            <column name="account_id" type="BIGINT"><constraints nullable="false" foreignKeyName="fk_pp_ben_account" references="agent_account(id)"/></column>
+            <column name="holder_name" type="VARCHAR(160)"><constraints nullable="false"/></column>
+            <column name="verified_name" type="VARCHAR(160)"/>
+            <column name="account_number_enc" type="VARCHAR(200)"><constraints nullable="false"/></column>
+            <column name="account_hash" type="VARCHAR(64)"><constraints nullable="false"/></column>
+            <column name="account_last4" type="VARCHAR(4)"><constraints nullable="false"/></column>
+            <column name="ifsc" type="VARCHAR(11)"><constraints nullable="false"/></column>
+            <column name="bank_name" type="VARCHAR(120)"><constraints nullable="false"/></column>
+            <column name="status" type="VARCHAR(20)"><constraints nullable="false"/></column>
+            <column name="created_at" type="${ts}"><constraints nullable="false"/></column>
+        </createTable>
+        <createIndex tableName="pp_beneficiaries" indexName="ix_pp_ben_account"><column name="account_id"/></createIndex>
+    </changeSet>
+
+    <!-- ===== Limits and commission for the new services (illustrative) ===== -->
+    <changeSet id="006-08-limits" author="primepay">
+        <sql>INSERT INTO pp_transaction_limits (scope, role_code, service_code, min_txn, max_txn, daily_amount, monthly_amount, daily_count, monthly_count, updated_at) VALUES ('ROLE','RETAILER','BILL_PAYMENT',100,200000,500000,10000000,100,3000,CURRENT_TIMESTAMP)</sql>
+        <sql>INSERT INTO pp_transaction_limits (scope, role_code, service_code, min_txn, max_txn, daily_amount, monthly_amount, daily_count, monthly_count, updated_at) VALUES ('ROLE','RETAILER','ADD_FUNDS',100,200000,500000,10000000,50,1500,CURRENT_TIMESTAMP)</sql>
+    </changeSet>
+
+    <changeSet id="006-09-bill-commission" author="primepay">
+        <insert tableName="pp_commission_rules"><column name="rule_code" value="CR-BILL-01"/><column name="service_code" value="BILL_PAYMENT"/><column name="calc_type" value="PERCENT"/><column name="effective_from" valueDate="2026-01-01T00:00:00"/><column name="status" value="ACTIVE"/><column name="created_at" valueDate="2026-01-01T00:00:00"/></insert>
+        <sql>INSERT INTO pp_commission_distribution (rule_id, level_role, rate, min_amount, max_amount) SELECT id, 'RETAILER', 0.10, 0.01, 200 FROM pp_commission_rules WHERE rule_code = 'CR-BILL-01'</sql>
+        <sql>INSERT INTO pp_commission_distribution (rule_id, level_role, rate, min_amount, max_amount) SELECT id, 'DISTRIBUTOR', 0.05, 0.01, 100 FROM pp_commission_rules WHERE rule_code = 'CR-BILL-01'</sql>
+        <sql>INSERT INTO pp_commission_distribution (rule_id, level_role, rate, min_amount, max_amount) SELECT id, 'MASTER_DISTRIBUTOR', 0.03, 0.01, 60 FROM pp_commission_rules WHERE rule_code = 'CR-BILL-01'</sql>
+        <sql>INSERT INTO pp_commission_distribution (rule_id, level_role, rate, min_amount, max_amount) SELECT id, 'SUPER_DISTRIBUTOR', 0.02, 0.01, 40 FROM pp_commission_rules WHERE rule_code = 'CR-BILL-01'</sql>
+        <sql>INSERT INTO pp_commission_distribution (rule_id, level_role, rate, min_amount, max_amount) SELECT id, 'PLATFORM', 0.02, 0.01, 40 FROM pp_commission_rules WHERE rule_code = 'CR-BILL-01'</sql>
+    </changeSet>
+</databaseChangeLog>

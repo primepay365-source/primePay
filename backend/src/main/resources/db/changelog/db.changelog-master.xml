@@ -11,4 +11,7 @@
     <include file="002-create-account-user-oracle.sql" relativeToChangelogFile="true"/>
     <include file="003-create-distributor-onboarding-h2.sql" relativeToChangelogFile="true"/>
     <include file="003-create-distributor-onboarding-oracle.sql" relativeToChangelogFile="true"/>
+    <include file="005-platform-core.xml" relativeToChangelogFile="true"/>
+    <include file="006-payswitch-services.xml" relativeToChangelogFile="true"/>
+    <include file="007-business-all-levels.xml" relativeToChangelogFile="true"/>
 </databaseChangeLog>
