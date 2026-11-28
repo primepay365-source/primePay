@@ -48,6 +48,17 @@ npm run dev
 
 Open http://localhost:5173 and sign in. Swagger UI: http://localhost:8080/swagger-ui/index.html.
 
+## Deploy a demo on Render (free)
+
+The root `Dockerfile` builds the web app into the Spring Boot jar, so one service serves the screens and the API at the same URL. `render.yaml` describes that service.
+
+1. Sign in at https://render.com with GitHub and allow access to this repository.
+2. **New → Blueprint**, choose this repository and the branch to deploy, and click **Apply**.
+3. When the deploy finishes, open the service URL (`https://primepay-….onrender.com`).
+4. Sign-in passwords are in the service's **Environment** tab: `APP_DEV_BOOTSTRAP_PASSWORD` for `admin@primepay.local`, `APP_DEV_SEED_PASSWORD` for the other demo accounts (`super@`, `master@`, `distributor@`, `retailer@` … `primepay.local`).
+
+This is a demo deployment: it runs the `dev` profile with an in-memory database (everything resets when the service restarts or wakes from sleep), simulated payment providers and on-screen OTPs. Use the `oracle` profile with real secrets and providers for anything beyond a demo.
+
 ## Run with Oracle (Docker)
 
 ```powershell

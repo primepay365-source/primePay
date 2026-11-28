@@ -37,3 +37,6 @@ qa/node_modules/
 qa/out/
 qa/.env.qa
 frontend/tsconfig.tsbuildinfo
+
+# Web app copied into the API only by the hosting Docker build
+backend/src/main/resources/static/
