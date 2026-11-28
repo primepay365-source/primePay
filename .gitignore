@@ -1,0 +1,46 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Dependencies and build output
+node_modules
+dist
+dist-ssr
+backend/target/
+backend/build/
+backend/.gradle/
+*.local
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Local tool files
+.claude/settings.local.json
+.docx_preview/
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# QA tooling (dev only)
+qa/node_modules/
+qa/out/
+qa/.env.qa
+frontend/tsconfig.tsbuildinfo
+
+# Web app copied into the API only by the hosting Docker build
+backend/src/main/resources/static/
+
+# Application log files
+logs/
+backend/logs/

@@ -1,0 +1,18 @@
+# Keep the hosting image small and free of local files and secrets
+**/node_modules
+**/target
+**/dist
+backend/build
+backend/.gradle
+qa/
+docs/
+.git
+.idea
+.vscode
+.claude
+*.docx
+*.pptx
+*.env
+.env*
+!.env.example
+frontend/tsconfig.tsbuildinfo

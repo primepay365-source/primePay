@@ -1,0 +1,1 @@
+{"name":"primepay-qa","private":true,"type":"module","description":"UI test run, recording and QA reports for PrimePay (dev only)","devDependencies":{"@ffmpeg-installer/ffmpeg":"^1.1.0","exceljs":"^4.4.0","pdfkit":"^0.15.2","playwright-core":"^1.49.1"}}

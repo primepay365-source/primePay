@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PrimePay logging.
+  - Console: always (what you see when running the app).
+  - logs/primepay-api.log: everything at INFO and above, a new file every day (and every 20 MB), kept 30 days,
+    1 GB total at most. Old files are gzipped.
+  - logs/primepay-api-error.log: WARN and ERROR only, kept 90 days, for quick troubleshooting.
+  Every line carries the request ID (also returned to clients as X-Request-Id) so one request can be followed.
+  The folder is LOG_DIR (environment) or logging.file.path, default "logs" next to where the API starts.
+  Tests log to the console only. Secrets, passwords, card numbers and sign-in codes are never logged in prod.
+-->
+<configuration scan="false">
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name" defaultValue="primepay-api"/>
+    <springProperty scope="context" name="LOG_DIR" source="logging.file.path" defaultValue="logs"/>
+
+    <property name="PATTERN"
+              value="%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{requestId:-}] [%thread] %logger{40} : %msg%n%ex"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_DIR}/${APP_NAME}.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archive/${APP_NAME}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>20MB</maxFileSize>
+            <maxHistory>30</maxHistory>
+            <totalSizeCap>1GB</totalSizeCap>
+            <cleanHistoryOnStart>true</cleanHistoryOnStart>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>WARN</level>
+        </filter>
+        <file>${LOG_DIR}/${APP_NAME}-error.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archive/${APP_NAME}-error.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>20MB</maxFileSize>
+            <maxHistory>90</maxHistory>
+            <totalSizeCap>500MB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- File writes happen off the request thread; WARN/ERROR are never dropped when the queue is full. -->
+    <appender name="ASYNC_FILE" class="ch.qos.logback.classic.AsyncAppender">
+        <queueSize>8192</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <neverBlock>false</neverBlock>
+        <appender-ref ref="FILE"/>
+    </appender>
+
+    <!-- Quieter third-party loggers -->
+    <logger name="org.hibernate.orm.deprecation" level="ERROR"/>
+    <logger name="com.zaxxer.hikari" level="INFO"/>
+    <logger name="liquibase" level="INFO"/>
+
+    <springProfile name="test">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <springProfile name="!test">
+        <logger name="com.primepay" level="${PRIMEPAY_LOG_LEVEL:-INFO}"/>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="ASYNC_FILE"/>
+            <appender-ref ref="ERROR_FILE"/>
+        </root>
+    </springProfile>
+</configuration>
