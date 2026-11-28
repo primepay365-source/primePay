@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+                   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.29.xsd">
+
+    <!--
+      Add funds commission chain. A ₹1,000 top-up: the gateway keeps 2% (₹980 left), then each level ABOVE the
+      account that loads keeps 0.5% (₹5): Platform Admin → ₹975, Super → ₹970, Master → ₹965, Distributor → ₹960.
+      So a Retailer is credited ₹960, a Distributor ₹965, a Master ₹970, a Super Distributor ₹975.
+      Nothing moves to levels below the account that loads. Illustrative values; the Platform Admin can change the
+      gateway charge per category (Admin configuration → Payment gateway) and the margins (Commission rules).
+    -->
+    <changeSet id="008-01-gateway-charge" author="primepay">
+        <update tableName="pp_gateway_categories"><column name="charge_percent" valueNumeric="2.000000"/></update>
+    </changeSet>
+
+    <changeSet id="008-02-add-funds-commission" author="primepay">
+        <insert tableName="pp_commission_rules"><column name="rule_code" value="CR-ADDF-01"/><column name="service_code" value="ADD_FUNDS"/><column name="calc_type" value="PERCENT"/><column name="effective_from" valueDate="2026-01-01T00:00:00"/><column name="status" value="ACTIVE"/><column name="created_at" valueDate="2026-01-01T00:00:00"/></insert>
+        <sql>INSERT INTO pp_commission_distribution (rule_id, level_role, rate) SELECT id, 'PLATFORM', 0.5 FROM pp_commission_rules WHERE rule_code = 'CR-ADDF-01'</sql>
+        <sql>INSERT INTO pp_commission_distribution (rule_id, level_role, rate) SELECT id, 'SUPER_DISTRIBUTOR', 0.5 FROM pp_commission_rules WHERE rule_code = 'CR-ADDF-01'</sql>
+        <sql>INSERT INTO pp_commission_distribution (rule_id, level_role, rate) SELECT id, 'MASTER_DISTRIBUTOR', 0.5 FROM pp_commission_rules WHERE rule_code = 'CR-ADDF-01'</sql>
+        <sql>INSERT INTO pp_commission_distribution (rule_id, level_role, rate) SELECT id, 'DISTRIBUTOR', 0.5 FROM pp_commission_rules WHERE rule_code = 'CR-ADDF-01'</sql>
+    </changeSet>
+
+    <!-- Money no longer moves down the chain: each account funds its own wallet. -->
+    <changeSet id="008-03-disable-transfers" author="primepay">
+        <update tableName="pp_service_master"><column name="enabled" valueBoolean="false"/><where>service_code = 'WALLET_TRANSFER'</where></update>
+    </changeSet>
+</databaseChangeLog>

@@ -95,6 +95,50 @@ public class CommissionEngine {
     /** Called inside the payout's database transaction after it reaches SUCCESS. */
     @Transactional(propagation = Propagation.MANDATORY)
     public List<CommissionEntry> distribute(FinancialTransaction source, AgentAccount transactingUser) {
+        return distribute(source, transactingUser, false);
+    }
+
+    /**
+     * One share of a rule for one transaction: the earning account (null for the platform share) and the amount.
+     */
+    public record Split(String levelRole, AgentAccount earner, BigDecimal amount) {
+    }
+
+    /**
+     * Shares paid to the levels ABOVE the transacting account (the account itself earns nothing), with the
+     * Platform Admin's share as PLATFORM. Levels missing from the chain, or inactive, are skipped and not charged.
+     * Used for add funds: the loading account is credited the amount minus the gateway charge and these shares.
+     */
+    @Transactional(readOnly = true)
+    public List<Split> uplineSplit(String serviceCode, BigDecimal amount, AgentAccount transactingUser) {
+        Optional<CommissionRule> found = ruleFor(serviceCode, amount);
+        if (found.isEmpty()) {
+            return List.of();
+        }
+        CommissionRule rule = found.get();
+        Map<String, AgentAccount> chain = new HashMap<>();
+        for (AgentAccount a = transactingUser.getParent(); a != null; a = a.getParent()) {
+            chain.putIfAbsent(a.getRole().name(), a);
+        }
+        List<Split> out = new ArrayList<>();
+        for (CommissionShare share : rule.getShares()) {
+            BigDecimal value = share.calculate(rule.getCalcType(), amount);
+            if (value.signum() <= 0) continue;
+            if ("PLATFORM".equals(share.getLevelRole())) {
+                out.add(new Split("PLATFORM", null, value));
+                continue;
+            }
+            AgentAccount earner = chain.get(share.getLevelRole());
+            if (earner != null && earner.isActive()) {
+                out.add(new Split(share.getLevelRole(), earner, value));
+            }
+        }
+        return out;
+    }
+
+    /** As {@link #distribute(FinancialTransaction, AgentAccount)}; with {@code uplinesOnly} the transacting account earns no share. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public List<CommissionEntry> distribute(FinancialTransaction source, AgentAccount transactingUser, boolean uplinesOnly) {
         // Never credit commission twice for the same transaction (for example a retried status recheck).
         if (!entries.findBySourceTxnIdOrderByIdAsc(source.getId()).isEmpty()) {
             return List.of();
@@ -106,7 +150,7 @@ public class CommissionEngine {
         CommissionRule rule = found.get();
 
         Map<String, AgentAccount> chain = new HashMap<>();
-        for (AgentAccount a = transactingUser; a != null; a = a.getParent()) {
+        for (AgentAccount a = uplinesOnly ? transactingUser.getParent() : transactingUser; a != null; a = a.getParent()) {
             chain.putIfAbsent(a.getRole().name(), a);
         }
 

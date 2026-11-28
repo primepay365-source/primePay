@@ -90,13 +90,15 @@ Handy test values for the retailer flow are listed in the next section. In devel
 
 | Level | Belongs to | Can create and manage | Can see | Does business* |
 |---|---|---|---|---|
-| Platform Admin | — | Super, Master, Distributor, Retailer (each under a parent of the level above) | Everything | No |
-| Super Distributor | Platform Admin | Master Distributors, Distributors, Retailers in its network | Its whole downstream network, transactions, wallets, reports | Yes |
-| Master Distributor | Super Distributor | Distributors under itself, and Retailers under those Distributors | Its Distributors and their Retailers | Yes |
+| Platform Admin | — | Super, Master, Distributor, Retailer (network levels under the level above; a Retailer under any level) | Everything | No |
+| Super Distributor | Platform Admin | Master Distributors, Distributors, Retailers anywhere in its network (including directly under itself) | Its whole downstream network, transactions, wallets, reports | Yes |
+| Master Distributor | Super Distributor | Distributors under itself; Retailers under itself or its Distributors | Its Distributors and their Retailers | Yes |
 | Distributor | Master Distributor | Retailers under itself | Its own Retailers | Yes |
-| Retailer | Distributor | Nobody | Only its own account | Yes |
+| Retailer | Distributor, Master, Super or Admin | Nobody | Only its own account | Yes |
 
-\*Business = bill payments, add funds and withdraw funds from the account's own main wallet. Commission is paid to the transacting account and the levels above it per the commission rule. The API enforces all of this; the screens only hide what a role can't use.
+\*Business = bill payments, add funds and withdraw funds from the account's own main wallet. Money never moves down the chain (there are no transfers to child accounts); each account funds its own wallet with Add funds.
+
+**Commission goes up the chain only, and stops at the account that transacts.** Add funds of ₹1,000: the gateway keeps 2% (₹980 left), then the Platform Admin and each level above the account keep 0.5% (₹5). A Super Distributor is credited ₹975, a Master Distributor ₹970, a Distributor ₹965, a Retailer ₹960. Bill payments and withdrawals pay a share to the account and each level above it. Rates are set by the Platform Admin (Commission rules; gateway charge under Admin configuration → Payment gateway). The API enforces all of this; the screens only hide what a role can't use.
 
 ## Retailer business flow (bill payments)
 

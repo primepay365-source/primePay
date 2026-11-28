@@ -51,8 +51,9 @@ public class AccountService {
         if (!canCreate(actor.getRole(), request.role())) {
             throw new BusinessException(ErrorCode.ACCESS_DENIED, "Your role can't create a " + label(request.role()) + ".");
         }
-        if (request.role().requiredParentRole() != parent.getRole()) {
-            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "A " + label(request.role()) + " must belong to a " + label(request.role().requiredParentRole()) + ".");
+        if (!request.role().allowedParentRoles().contains(parent.getRole())) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "A " + label(request.role()) + " must belong to a "
+                    + request.role().allowedParentRoles().stream().sorted(java.util.Comparator.reverseOrder()).map(AccountService::label).collect(Collectors.joining(" or ")) + ".");
         }
         if (!parent.isActive()) {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "The parent account is not active");

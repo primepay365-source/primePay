@@ -1,4 +1,4 @@
-import { Box, Breadcrumbs, Button, Link, Tab, Tabs, Typography } from '@mui/material'
+import { Box, Breadcrumbs, Link, Tab, Tabs, Typography } from '@mui/material'
 import { useState } from 'react'
 import { Link as RouterLink, useParams } from 'react-router-dom'
 import { PageHeader } from '../../components/common/PageHeader'
@@ -8,7 +8,6 @@ import { Facts, Section } from '../../components/common/Section'
 import { StatusChip } from '../../components/common/StatusChip'
 import { TransactionTable } from '../../components/tables/TransactionTable'
 import { useApiData } from '../../hooks/useApiData'
-import { useAuth } from '../../hooks/useAuth'
 import { api } from '../../services/api'
 import { colors } from '../../theme/tokens'
 import type { StatusChange, Transaction, UserRow, WalletSummary } from '../../types/domain'
@@ -16,7 +15,6 @@ import { dateTime, money } from '../../utils/format'
 
 export function UserDetailPage() {
   const { id } = useParams()
-  const { user: me } = useAuth()
   const [tab, setTab] = useState(0)
   const u = useApiData(() => api.get<UserRow>(`/users/${id}`), [id])
   const wallet = useApiData(() => (u.data && u.data.role !== 'ADMIN' && u.data.status === 'ACTIVE' ? api.get<WalletSummary>(`/wallets/${id}`) : Promise.resolve(null)), [id, u.data?.status])
@@ -26,7 +24,6 @@ export function UserDetailPage() {
   if (u.error) return <ErrorCard message={u.error} onRetry={u.reload} />
   if (!u.data) return <LoadingCard />
   const user = u.data
-  const canSend = me && user.parentId === me.accountId && user.status === 'ACTIVE' && me.role !== 'ADMIN' && me.role !== 'RETAILER'
 
   return (
     <>
@@ -34,7 +31,6 @@ export function UserDetailPage() {
       <PageHeader
         title={user.displayName}
         subtitle={<Box component="span" sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}><RoleChip role={user.role} /><StatusChip status={user.status} />{user.accountCode} · parent {user.parentCode ?? 'Platform'}</Box>}
-        actions={canSend && <Button variant="contained" component={RouterLink} to={`/wallet/transfer?to=${user.id}`}>Transfer funds</Button>}
       />
       <Tabs value={tab} onChange={(_, v) => setTab(v)} aria-label="User sections" variant="scrollable" sx={{ borderBottom: `1px solid ${colors.border}` }}>
         <Tab label="Overview" />

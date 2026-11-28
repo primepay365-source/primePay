@@ -27,9 +27,12 @@ export const CREATABLE: Record<Role, Role[]> = {
   DISTRIBUTOR: ['RETAILER'],
   RETAILER: [],
 }
-const PARENT_ROLE: Record<Role, Role | null> = {
-  ADMIN: null, SUPER_DISTRIBUTOR: 'ADMIN', MASTER_DISTRIBUTOR: 'SUPER_DISTRIBUTOR', DISTRIBUTOR: 'MASTER_DISTRIBUTOR', RETAILER: 'DISTRIBUTOR',
+/** Levels each role may sit under (matches the API): a Retailer may be placed directly under any level above it. */
+const PARENT_ROLES: Record<Role, Role[]> = {
+  ADMIN: [], SUPER_DISTRIBUTOR: ['ADMIN'], MASTER_DISTRIBUTOR: ['SUPER_DISTRIBUTOR'], DISTRIBUTOR: ['MASTER_DISTRIBUTOR'],
+  RETAILER: ['DISTRIBUTOR', 'MASTER_DISTRIBUTOR', 'SUPER_DISTRIBUTOR', 'ADMIN'],
 }
+const parentText = (role: Role) => PARENT_ROLES[role].map((r) => ROLE_LABELS[r]).join(', ').replace(/, ([^,]*)$/, ' or $1')
 const MANAGEABLE: Record<Role, Role[]> = {
   ADMIN: ['SUPER_DISTRIBUTOR', 'MASTER_DISTRIBUTOR', 'DISTRIBUTOR', 'RETAILER'],
   SUPER_DISTRIBUTOR: ['MASTER_DISTRIBUTOR', 'DISTRIBUTOR', 'RETAILER'],
@@ -203,9 +206,9 @@ function AddUserDialog({ onClose, onCreated }: { onClose: () => void; onCreated:
 
   const parents = useMemo(() => {
     if (!user) return []
-    const needed = PARENT_ROLE[role]
-    const own = user.role === needed ? [{ id: user.accountId, code: user.accountCode, name: user.displayName, role: user.role as Role, you: true }] : []
-    return own.concat((candidates.data ?? []).filter((u) => u.role === needed).map((u) => ({ id: u.id, code: u.accountCode, name: u.displayName, role: u.role, you: false })))
+    const allowed = PARENT_ROLES[role]
+    const own = allowed.includes(user.role as Role) ? [{ id: user.accountId, code: user.accountCode, name: user.displayName, role: user.role as Role, you: true }] : []
+    return own.concat((candidates.data ?? []).filter((u) => allowed.includes(u.role)).map((u) => ({ id: u.id, code: u.accountCode, name: u.displayName, role: u.role, you: false })))
   }, [candidates.data, role, user])
   const parent = parents.find((p) => p.id === parentId)
 
@@ -276,8 +279,8 @@ function AddUserDialog({ onClose, onCreated }: { onClose: () => void; onCreated:
                 {roles.map((r) => <MenuItem key={r} value={r}>{ROLE_LABELS[r]}</MenuItem>)}
               </TextField>
               <TextField select required label="Parent account" value={parentId} onChange={(e) => setParentId(Number(e.target.value))} error={!!shown('parentId') && parents.length > 0}
-                helperText={parents.length === 0 ? `You need an active ${PARENT_ROLE[role] ? ROLE_LABELS[PARENT_ROLE[role] as Role] : ''} first` : `A ${ROLE_LABELS[role]} belongs to a ${ROLE_LABELS[PARENT_ROLE[role] as Role]}`}>
-                {parents.map((p) => <MenuItem key={p.id} value={p.id}>{p.code} · {p.name}{p.you ? ' (you)' : ''}</MenuItem>)}
+                helperText={parents.length === 0 ? `You need an active ${parentText(role)} first` : `A ${ROLE_LABELS[role]} belongs to a ${parentText(role)}`}>
+                {parents.map((p) => <MenuItem key={p.id} value={p.id}>{p.code} · {p.name} · {ROLE_LABELS[p.role]}{p.you ? ' (you)' : ''}</MenuItem>)}
               </TextField>
               <TextField required label="User ID" value={form.accountCode} onChange={set('accountCode')} error={!!shown('accountCode')} helperText={shown('accountCode') ?? 'Suggested automatically; you can change it'} />
               <TextField required label="Full name" value={form.displayName} onChange={set('displayName')} error={!!shown('displayName')} helperText={shown('displayName')} />

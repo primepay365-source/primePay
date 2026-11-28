@@ -54,6 +54,12 @@ public class AddFundsController {
         return ApiResponse.ok(service.updateCategory(currentActor.require(), id, body.minAmount(), body.maxAmount(), body.chargePercent(), body.enabled()));
     }
 
+    @Operation(summary = "Charges for a top-up: gateway charge, each upline level's margin and the amount credited")
+    @GetMapping("/preview")
+    public ApiResponse<AddFundsService.Breakdown> preview(@RequestParam String categoryCode, @RequestParam BigDecimal amount) {
+        return ApiResponse.ok(service.preview(currentActor.require(), categoryCode, amount));
+    }
+
     public record StartBody(@NotBlank String categoryCode,
                             @NotBlank @Pattern(regexp = "VISA|MASTERCARD|RUPAY", message = "Choose Visa, Mastercard or RuPay") String cardNetwork,
                             @NotBlank @Size(min = 2, max = 120) String cardHolder,

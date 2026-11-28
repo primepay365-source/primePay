@@ -26,9 +26,9 @@ function greeting(now: Date): string {
 
 const CTA: Record<string, [string, string]> = {
   ADMIN: ['Add user', '/users?add=1'],
-  SUPER_DISTRIBUTOR: ['Transfer funds', '/wallet/transfer'],
-  MASTER_DISTRIBUTOR: ['Transfer funds', '/wallet/transfer'],
-  DISTRIBUTOR: ['Transfer to retailer', '/wallet/transfer'],
+  SUPER_DISTRIBUTOR: ['Add funds', '/add-funds'],
+  MASTER_DISTRIBUTOR: ['Add funds', '/add-funds'],
+  DISTRIBUTOR: ['Add funds', '/add-funds'],
   RETAILER: ['Pay a bill', '/bills'],
 }
 

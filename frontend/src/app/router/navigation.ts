@@ -15,7 +15,6 @@ import PaymentsOutlined from '@mui/icons-material/PaymentsOutlined'
 import PercentOutlined from '@mui/icons-material/PercentOutlined'
 import PersonAddAltOutlined from '@mui/icons-material/PersonAddAltOutlined'
 import ReceiptLongOutlined from '@mui/icons-material/ReceiptLongOutlined'
-import SendOutlined from '@mui/icons-material/SendOutlined'
 import SpeedOutlined from '@mui/icons-material/SpeedOutlined'
 import TuneOutlined from '@mui/icons-material/TuneOutlined'
 import type { Role } from '../../types/auth'
@@ -31,7 +30,6 @@ export interface NavItem {
 
 const BUSINESS: readonly Role[] = ['SUPER_DISTRIBUTOR', 'MASTER_DISTRIBUTOR', 'DISTRIBUTOR', 'RETAILER']
 const NETWORK: readonly Role[] = ['ADMIN', 'SUPER_DISTRIBUTOR', 'MASTER_DISTRIBUTOR', 'DISTRIBUTOR']
-const SENDERS: readonly Role[] = ['SUPER_DISTRIBUTOR', 'MASTER_DISTRIBUTOR', 'DISTRIBUTOR']
 
 /** Single source of truth for the sidebar. The API enforces every permission again; this only hides screens. */
 export const NAV_ITEMS: readonly NavItem[] = [
@@ -44,7 +42,6 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { key: 'addFunds', label: 'Add funds', path: '/add-funds', icon: AddCardOutlined, roles: BUSINESS },
   { key: 'withdraw', label: 'Withdraw funds', path: '/withdraw', icon: PaymentsOutlined, roles: BUSINESS },
   { key: 'wallet', label: 'Main wallet', path: '/wallet', icon: AccountBalanceWalletOutlined, roles: BUSINESS },
-  { key: 'transfer', label: 'Transfer funds', path: '/wallet/transfer', icon: SendOutlined, roles: SENDERS },
   { key: 'transactions', label: 'Transactions', path: '/transactions', icon: ReceiptLongOutlined, roles: ROLES },
   { key: 'adjustments', label: 'Adjustments', path: '/admin/adjustments', icon: TuneOutlined, roles: ['ADMIN'] },
   { key: 'commission', label: 'Commission rules', path: '/commissions', icon: PercentOutlined, roles: ['ADMIN'] },

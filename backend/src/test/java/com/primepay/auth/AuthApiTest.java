@@ -102,7 +102,7 @@ class AuthApiTest {
     }
 
     @Test
-    void adminCanCreateSuperDistributorButRetailerNeedsADistributorParent() throws Exception {
+    void adminCanCreateSuperDistributorButDistributorNeedsAMasterParent() throws Exception {
         String token = login(ADMIN, PASSWORD);
         long adminId = json.readTree(mvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer " + token))
                 .andReturn().getResponse().getContentAsString()).at("/data/accountId").asLong();
@@ -118,7 +118,7 @@ class AuthApiTest {
         mvc.perform(post("/api/v1/accounts")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(newAccount("PP-RT-T001", "RETAILER", adminId, "retailer.t001")))
+                        .content(newAccount("PP-DT-T001", "DISTRIBUTOR", adminId, "dist.t001")))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"));
     }

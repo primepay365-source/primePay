@@ -159,6 +159,22 @@ const MONEY = '"₹"#,##0.00'
   }
   note(lines, 'Every commission row on the platform (Platform Admin view).')
   finish(lines)
+
+  // Add funds chain: commission goes up only; the loading account gets the rest; nothing goes below it.
+  const chain = sheet(wb, 'Add funds chain', [['Who added funds', 'who', 20], ['Amount ₹', 'amt', 13], ['Gateway charge ₹', 'gw', 15], ['Margins kept above ₹', 'mg', 17],
+    ['Expected credited ₹ (formula)', 'exp', 20], ['Actual credited ₹', 'act', 16], ['Check', 'chk', 11], ['Levels above: margin earned', 'up', 34], ['Levels below: change', 'down', 30]])
+  for (const c of evidence.commission.addFundsChain ?? []) {
+    const r = chain.addRow({ who: c.who, amt: c.amount, gw: c.gateway, mg: c.margins, act: c.actualCredited,
+      up: Object.entries(c.uplines).map(([k, v]) => `${LEVEL[k]} ₹${v}`).join(', ') || 'none (platform share only)',
+      down: Object.entries(c.below).map(([k, v]) => `${LEVEL[k]} ₹${v}`).join(', ') || 'none' })
+    const n = r.number
+    r.getCell('exp').value = { formula: `B${n}-C${n}-D${n}`, result: c.credited }
+    r.getCell('chk').value = { formula: `IF(ABS(E${n}-F${n})<0.005,"MATCH","MISMATCH")`, result: Math.abs(c.credited - c.actualCredited) < 0.005 ? 'MATCH' : 'MISMATCH' }
+    for (const k of ['amt', 'gw', 'mg', 'exp', 'act']) r.getCell(k).numFmt = MONEY
+    statusFill(r.getCell('chk'))
+  }
+  note(chain, 'Rule CR-ADDF-01: the gateway keeps its category charge (2%), then the Platform Admin and each level ABOVE the account that adds funds keep 0.5%. On ₹1,000: Super ₹975, Master ₹970, Distributor ₹965, Retailer ₹960.')
+  finish(chain)
   await wb.xlsx.writeFile(join(DELIVER, 'PrimePay_Commission_Distribution_Report.xlsx'))
 }
 
@@ -250,13 +266,36 @@ const FIXED_DURING_TEST = [
     `Admin creates Super Distributor ${evidence.users[0]?.code}; it signs in and creates Master Distributor ${evidence.users[1]?.code}.`,
     `The Master Distributor creates Distributor ${evidence.users[2]?.code}; it creates Retailer ${evidence.users[3]?.code}.`,
     'Each create screen is checked for permitted roles, required-field validation, parent link, commission configuration, generated IDs and the user list.',
-    'Wallet funding: the Super Distributor requests a ₹5,00,000 wallet load, the Admin approves it, and funds are transferred Super → Master → Distributor → Retailer.',
-    'Add funds: card top-up (Education), UPI top-up (E-commerce) and a declined card; credited amount = amount − category charge.',
+    'A Retailer is also created directly under the Super Distributor (a Retailer may sit under any level above it).',
+    'Add funds by each level: the Super Distributor adds ₹2,00,000, the Master Distributor and Distributor ₹1,000 each; only the account that adds funds is credited, the levels above earn their margin, and the accounts below are unchanged. No money is transferred down the chain.',
+    'Retailer add funds: card top-up (Education), UPI top-up (E-commerce) and a declined card; credited = amount − gateway charge − upline margins.',
     'Bill payments: success, pending then recheck to success, and a declined payment refunded in full; bill history.',
     'Withdraw funds: an account the bank cannot verify, a verified account, and a ₹2,000 transfer.',
     'Transactions, receipt, reports and notifications; then commission per level is recalculated from the configured rules and compared with what was credited, and each role signs in to check its statement.',
     'Direct URL access and backend API authorization are tested for each role; the Admin tours reports, reconciliation, audit log, limits and configuration, then the commission report, transaction split and hierarchy tree close the run.',
   ].forEach((t, i) => p(`${i + 1}. ${t}`))
+
+  h1('Add funds: commission goes up the chain only')
+  p('The gateway keeps its charge (2%); the Platform Admin and every level above the account that adds funds keep 0.5% each; the account is credited the rest. Nothing moves to accounts below it, and money is never transferred down the chain.')
+  doc.moveDown(0.3)
+  {
+    const cw = [110, 70, 70, 85, 85, 80]
+    const row = (cells, opts = {}) => {
+      const y = doc.y
+      let x = 48
+      cells.forEach((c, i) => { doc.font(opts.bold ? 'B' : 'R').fontSize(9.5).fillColor(opts.color?.[i] ?? '#222').text(String(c), x, y, { width: cw[i] - 6 }); x += cw[i] })
+      doc.y = y + 16
+      doc.x = 48
+    }
+    row(['Who added funds', 'Amount', 'Gateway', 'Margins above', 'Credited', 'Below got'], { bold: true })
+    for (const c of evidence.commission.addFundsChain ?? []) {
+      const ok = Math.abs(c.credited - c.actualCredited) < 0.005
+      const below = Object.values(c.below).every((v) => v === 0) ? '₹0 (correct)' : 'CHANGED'
+      row([c.who, `₹${c.amount.toLocaleString('en-IN')}`, `₹${c.gateway}`, `₹${c.margins}`, `₹${c.actualCredited.toLocaleString('en-IN')}`, below], { color: [null, null, null, null, ok ? green : red, below.startsWith('₹0') ? green : red] })
+    }
+    doc.moveDown(0.3)
+    p('Rule on ₹1,000: Super Distributor ₹975 · Master Distributor ₹970 · Distributor ₹965 · Retailer ₹960 (also verified by the backend test CommissionChainTest).', { color: muted })
+  }
 
   h1('Commission calculation')
   const ex = evidence.commission.expected
@@ -310,7 +349,7 @@ const FIXED_DURING_TEST = [
   }
 
   // Screenshots
-  const pick = ['login', 'admin-dashboard', 'commission-rules', 'qa.sd', 'admin-approve-load', 'rt-add-funds-card', 'rt-add-funds-upi', 'rt-bill-paid', 'rt-bill-pending', 'rt-bill-failed', 'rt-withdraw-done', 'rt-commission', 'super_distributor-commission', 'distributor-commission', 'admin-commission-report', 'txn-commission-split', 'hierarchy']
+  const pick = ['login', 'admin-dashboard', 'commission-rules', 'qa.sd', 'addfunds-breakdown-super', 'addfunds-breakdown-distributor', 'rt-add-funds-card', 'rt-add-funds-upi', 'rt-bill-paid', 'rt-bill-pending', 'rt-bill-failed', 'rt-withdraw-done', 'rt-commission', 'super_distributor-commission', 'distributor-commission', 'admin-commission-report', 'txn-commission-split', 'hierarchy']
   const chosen = []
   for (const key of pick) {
     const s = evidence.screens.find((x) => x.file.includes(key) && !chosen.includes(x))

@@ -95,19 +95,22 @@ class CommissionChainTest {
         BigDecimal configured = expected.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
         assertThat(allocated).isEqualByComparingTo(configured);
 
-        // Each earner's statement shows its own share, and the parent sees it under the right child.
+        // Each earner's statement: its bill share plus its add-funds margin (the Retailer, who loaded, earns no margin).
+        Map<String, BigDecimal> margins = expectedShares("ADD_FUNDS", new BigDecimal("5000.00"));
+        java.util.function.Function<String, BigDecimal> total = (l) -> expected.get(l).add(margins.getOrDefault(l, BigDecimal.ZERO));
         assertThat(earned(rt)).isEqualByComparingTo(expected.get("RETAILER"));
-        assertThat(earned(dt)).isEqualByComparingTo(expected.get("DISTRIBUTOR"));
-        assertThat(earned(md)).isEqualByComparingTo(expected.get("MASTER_DISTRIBUTOR"));
-        assertThat(earned(sd)).isEqualByComparingTo(expected.get("SUPER_DISTRIBUTOR"));
+        assertThat(earned(dt)).isEqualByComparingTo(total.apply("DISTRIBUTOR"));
+        assertThat(earned(md)).isEqualByComparingTo(total.apply("MASTER_DISTRIBUTOR"));
+        assertThat(earned(sd)).isEqualByComparingTo(total.apply("SUPER_DISTRIBUTOR"));
         JsonNode dtChildren = call(get("/api/v1/commissions/statement"), dt, 200).at("/data/children");
-        assertThat(childCommission(dtChildren, rtId)).isEqualByComparingTo(expected.get("DISTRIBUTOR"));
+        assertThat(childCommission(dtChildren, rtId)).isEqualByComparingTo(total.apply("DISTRIBUTOR"));
         JsonNode sdChildren = call(get("/api/v1/commissions/statement"), sd, 200).at("/data/children");
-        assertThat(childCommission(sdChildren, mdId)).isEqualByComparingTo(expected.get("SUPER_DISTRIBUTOR"));
+        assertThat(childCommission(sdChildren, mdId)).isEqualByComparingTo(total.apply("SUPER_DISTRIBUTOR"));
         JsonNode platform = call(get("/api/v1/commissions/statement"), admin, 200).at("/data");
         assertThat(platform.at("/scope").asText()).isEqualTo("PLATFORM");
-        assertThat(platform.at("/earnedAllTime").decimalValue()).isEqualByComparingTo(configured);
-        assertThat(platform.at("/platformShareAllTime").decimalValue()).isEqualByComparingTo(expected.get("PLATFORM"));
+        BigDecimal marginTotal = margins.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+        assertThat(platform.at("/earnedAllTime").decimalValue()).isEqualByComparingTo(configured.add(marginTotal));
+        assertThat(platform.at("/platformShareAllTime").decimalValue()).isEqualByComparingTo(total.apply("PLATFORM"));
     }
 
     @Test @Order(3)
@@ -162,6 +165,39 @@ class CommissionChainTest {
                 {"ruleCode":"CR-BAD-2","serviceCode":"BILL_PAYMENT","calcType":"PERCENT","effectiveFrom":"2027-01-01",
                  "shares":[{"levelRole":"RETAILER","rate":60},{"levelRole":"DISTRIBUTOR","rate":50}]}""";
         call(post("/api/v1/commissions/rules").contentType(MediaType.APPLICATION_JSON).content(tooMuch), admin, 400);
+    }
+
+    @Test @Order(5)
+    void addFundsCommissionStopsAtTheLevelThatTransacts() throws Exception {
+        // The business example: on ₹1,000 the gateway keeps 2% and each level above the loading account 0.5%.
+        String[] who = {"RETAILER", "DISTRIBUTOR", "MASTER_DISTRIBUTOR", "SUPER_DISTRIBUTOR"};
+        String[] tokens = {rt, dt, md, sd};
+        String[] credited = {"960.00", "965.00", "970.00", "975.00"};
+        for (int i = 0; i < who.length; i++) {
+            BigDecimal[] before = {balance(rt), balance(dt), balance(md), balance(sd)};
+            addFunds(tokens[i], "1000");
+            BigDecimal[] after = {balance(rt), balance(dt), balance(md), balance(sd)};
+            for (int j = 0; j < who.length; j++) {
+                BigDecimal change = after[j].subtract(before[j]);
+                if (j == i) assertThat(change).as(who[i] + " credited").isEqualByComparingTo(credited[i]);
+                else if (j > i) assertThat(change).as(who[j] + " margin on " + who[i]).isEqualByComparingTo("5.00");
+                else assertThat(change).as(who[j] + " below " + who[i] + " gets nothing").isZero();
+            }
+        }
+        // A Retailer directly under the Super Distributor: only Super and the platform keep a margin.
+        long directId = create(sd, "C-RT-9", "RETAILER", sdId);
+        String direct = login("c.rt.9", PW);
+        BigDecimal sdBefore = balance(sd), mdBefore = balance(md), dtBefore = balance(dt);
+        addFunds(direct, "1000");
+        assertThat(balance(direct)).isEqualByComparingTo("970.00");
+        assertThat(balance(sd).subtract(sdBefore)).isEqualByComparingTo("5.00");
+        assertThat(balance(md)).isEqualByComparingTo(mdBefore);
+        assertThat(balance(dt)).isEqualByComparingTo(dtBefore);
+        assertThat(call(get("/api/v1/users/" + directId), sd, 200).at("/data/parentId").asLong()).isEqualTo(sdId);
+    }
+
+    private BigDecimal balance(String token) throws Exception {
+        return call(get("/api/v1/wallets/me"), token, 200).at("/data/availableBalance").decimalValue();
     }
 
     // ---------------------------------------------------------------- helpers

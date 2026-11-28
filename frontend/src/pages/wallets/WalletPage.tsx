@@ -27,7 +27,6 @@ export function WalletPage() {
   const statement = useApiData(() => api.get<StatementRow[]>('/wallets/statement', { from, to, direction }), [from, to, direction])
   if (!user) return null
   const canLoad = user.role === 'SUPER_DISTRIBUTOR' || user.role === 'MASTER_DISTRIBUTOR' || user.role === 'DISTRIBUTOR'
-  const canSend = canLoad
 
   const columns: ColumnDef<StatementRow, unknown>[] = [
     { id: 'date', header: 'Date', accessorKey: 'createdAt', cell: ({ getValue }) => dateTime(getValue() as string) },
@@ -54,8 +53,7 @@ export function WalletPage() {
             <Typography sx={{ fontSize: 34, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{money(s.availableBalance)}</Typography>
             <Box sx={{ display: 'flex', gap: 1.25, flexWrap: 'wrap' }}>
               {canLoad && <Button variant="contained" onClick={() => setLoadOpen(true)} sx={{ bgcolor: '#FFFFFF', color: colors.navy900, '&:hover': { bgcolor: '#EEF1F6' } }}>Load wallet</Button>}
-              {canSend && <Button variant="outlined" component={RouterLink} to="/wallet/transfer" sx={{ color: '#FFFFFF', borderColor: colors.indigo200 }}>Transfer funds</Button>}
-              {user.role === 'RETAILER' && <Button variant="contained" component={RouterLink} to="/add-funds" sx={{ bgcolor: '#FFFFFF', color: colors.navy900, '&:hover': { bgcolor: '#EEF1F6' } }}>Add funds</Button>}
+              {user.role !== 'ADMIN' && <Button variant="contained" component={RouterLink} to="/add-funds" sx={{ bgcolor: '#FFFFFF', color: colors.navy900, '&:hover': { bgcolor: '#EEF1F6' } }}>Add funds</Button>}
             </Box>
           </Box>
           <Section sx={{ flex: '2 1 480px', minWidth: 0 }}>

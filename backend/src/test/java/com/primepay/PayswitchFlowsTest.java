@@ -57,8 +57,8 @@ class PayswitchFlowsTest {
         assertThat(cats.size()).isEqualTo(3);
 
         JsonNode s = startSession("ECOM", "10000");
-        assertThat(s.at("/charge").decimalValue()).isEqualByComparingTo("120.00"); // 1.2%
-        assertThat(s.at("/netAmount").decimalValue()).isEqualByComparingTo("9880.00");
+        assertThat(s.at("/charge").decimalValue()).isEqualByComparingTo("400.00"); // gateway 2% + 0.5% x 4 levels above
+        assertThat(s.at("/netAmount").decimalValue()).isEqualByComparingTo("9600.00");
         String ref = s.at("/sessionRef").asText();
 
         JsonNode otpSent = call(post("/api/v1/add-funds/sessions/" + ref + "/pay").contentType(MediaType.APPLICATION_JSON)
@@ -68,15 +68,15 @@ class PayswitchFlowsTest {
 
         JsonNode done = call(complete(ref, otp), rt, 200).at("/data");
         assertThat(done.at("/status").asText()).isEqualTo("SUCCESS");
-        assertThat(balance(rt)).isEqualByComparingTo(before.add(new BigDecimal("9880.00")));
+        assertThat(balance(rt)).isEqualByComparingTo(before.add(new BigDecimal("9600.00")));
 
         // Completing again is safe: no second credit.
         call(complete(ref, otp), rt, 200);
-        assertThat(balance(rt)).isEqualByComparingTo(before.add(new BigDecimal("9880.00")));
+        assertThat(balance(rt)).isEqualByComparingTo(before.add(new BigDecimal("9600.00")));
 
         JsonNode txn = call(get("/api/v1/transactions/" + done.at("/transactionId").asLong()), rt, 200).at("/data/transaction");
         assertThat(txn.at("/type").asText()).isEqualTo("ADD_FUNDS");
-        assertThat(txn.at("/fee").decimalValue()).isEqualByComparingTo("120.00");
+        assertThat(txn.at("/fee").decimalValue()).isEqualByComparingTo("400.00");
         assertThat(txn.at("/cardLast4").asText()).isEqualTo("4242");
     }
 
@@ -227,18 +227,24 @@ class PayswitchFlowsTest {
         createUser(admin, "H-MD-1", "MASTER_DISTRIBUTOR", sdId, 201);
         createUser(admin, "H-DT-1", "DISTRIBUTOR", mdId, 201);
         createUser(admin, "H-RT-1", "RETAILER", dtId, 201);
-        JsonNode wrongParent = createUser(admin, "H-RT-X", "RETAILER", sdId, 400);
-        assertThat(wrongParent.at("/error/message").asText()).contains("must belong to a Distributor");
+        JsonNode wrongParent = createUser(admin, "H-DT-X0", "DISTRIBUTOR", sdId, 400);
+        assertThat(wrongParent.at("/error/message").asText()).contains("must belong to a Master Distributor");
+        // A Retailer may sit directly under any level above it.
+        createUser(admin, "H-RT-A", "RETAILER", adminId, 201);
+        createUser(admin, "H-RT-S", "RETAILER", sdId, 201);
+        createUser(admin, "H-RT-M", "RETAILER", mdId, 201);
 
         // Super creates Master, Distributor and Retailer inside its own network.
         createUser(sd, "H-MD-2", "MASTER_DISTRIBUTOR", sdId, 201);
         createUser(sd, "H-DT-2", "DISTRIBUTOR", mdId, 201);
         createUser(sd, "H-RT-2", "RETAILER", dtId, 201);
+        createUser(sd, "H-RT-6", "RETAILER", sdId, 201); // directly under the Super Distributor
         createUser(sd, "H-SD-X", "SUPER_DISTRIBUTOR", adminId, 403);
 
         // Master creates Distributors and Retailers inside its own network only.
         createUser(md, "H-DT-3", "DISTRIBUTOR", mdId, 201);
         createUser(md, "H-RT-4", "RETAILER", dtId, 201);
+        createUser(md, "H-RT-5", "RETAILER", mdId, 201); // directly under the Master Distributor
         call(get("/api/v1/users/" + rtId), md, 200);
         long otherSd = createUser(admin, "H-SD-9", "SUPER_DISTRIBUTOR", adminId, 201).at("/data/id").asLong();
         long otherMd = createUser(admin, "H-MD-9", "MASTER_DISTRIBUTOR", otherSd, 201).at("/data/id").asLong();
@@ -257,7 +263,10 @@ class PayswitchFlowsTest {
     void everyLevelExceptAdminCanDoBusiness() throws Exception {
         String sd = login("super@primepay.local", "Flow-Seed-Pass-1");
         String md = login("master@primepay.local", "Flow-Seed-Pass-1");
-        for (String token : new String[] {sd, md, dt}) {
+        String[] tokens = {sd, md, dt};
+        String[] credited = {"975.00", "970.00", "965.00"}; // 1000 - 2% gateway - 0.5% per level above
+        for (int i = 0; i < tokens.length; i++) {
+            String token = tokens[i];
             BigDecimal before = balance(token);
             JsonNode s = call(post("/api/v1/add-funds/sessions").contentType(MediaType.APPLICATION_JSON)
                     .content("{\"categoryCode\":\"EDU\",\"cardNetwork\":\"VISA\",\"cardHolder\":\"Test Holder\",\"amount\":1000}"), token, 201).at("/data");
@@ -265,7 +274,7 @@ class PayswitchFlowsTest {
             String otp = call(post("/api/v1/add-funds/sessions/" + ref + "/pay").contentType(MediaType.APPLICATION_JSON)
                     .content("{\"mode\":\"CARD\",\"cardLast4\":\"4242\"}"), token, 200).at("/data/devOtp").asText();
             assertThat(call(complete(ref, otp), token, 200).at("/data/status").asText()).isEqualTo("SUCCESS");
-            assertThat(balance(token)).isEqualByComparingTo(before.add(new BigDecimal("991.00"))); // 0.9% charge
+            assertThat(balance(token)).isEqualByComparingTo(before.add(new BigDecimal(credited[i])));
 
             long biller = call(get("/api/v1/bills/billers"), token, 200).at("/data/0/id").asLong();
             String fetchRef = call(post("/api/v1/bills/fetch").contentType(MediaType.APPLICATION_JSON)

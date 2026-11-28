@@ -24,7 +24,6 @@ import { TransactionDetailPage } from '../../pages/transactions/TransactionDetai
 import { TransactionsPage } from '../../pages/transactions/TransactionsPage'
 import { UserDetailPage } from '../../pages/users/UserDetailPage'
 import { UsersPage } from '../../pages/users/UsersPage'
-import { TransferPage } from '../../pages/wallets/TransferPage'
 import { WalletPage } from '../../pages/wallets/WalletPage'
 import { RedirectIfAuthenticated, RequireAuth, RequireRole } from './guards'
 import { rolesFor } from './navigation'
@@ -45,7 +44,7 @@ export function AppRoutes() {
         <Route path="/hierarchy" element={only('hierarchy', <HierarchyPage />)} />
         <Route path="/distributors/onboard" element={only('onboarding', <OnboardingPage />)} />
         <Route path="/wallet" element={only('wallet', <WalletPage />)} />
-        <Route path="/wallet/transfer" element={only('transfer', <TransferPage />)} />
+        <Route path="/wallet/transfer" element={<Navigate to="/add-funds" replace />} />
         <Route path="/bills" element={only('bills', <BillPaymentPage />)} />
         <Route path="/add-funds" element={only('addFunds', <AddFundsPage />)} />
         <Route path="/withdraw" element={only('withdraw', <WithdrawPage />)} />

@@ -50,76 +50,12 @@ public class TransferService {
         this.notifications = notifications;
         this.audit = audit;
     }
-
-    /**
-     * Super → Master → Distributor → Retailer: only to a direct, active child. Debit and credit happen in one
-     * database transaction with both wallets locked, so nothing is ever half-applied. Replaying the same
-     * Idempotency-Key returns the original transfer instead of debiting again.
-     */
-    @Transactional
-    public FinancialTransaction transfer(AgentAccount sender, Long receiverId, BigDecimal rawAmount, String remarks, String idempotencyKey) {
-        BigDecimal amount = Money.of(rawAmount);
-        if (sender.getRole() == AccountRole.ADMIN || sender.getRole() == AccountRole.RETAILER) {
-            throw new BusinessException(ErrorCode.ACCESS_DENIED, "Your role can't transfer funds.");
-        }
-        AgentAccount receiver = accounts.findById(receiverId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Recipient not found."));
-        if (receiver.getParent() == null || !receiver.getParent().getId().equals(sender.getId())) {
-            throw new BusinessException(ErrorCode.OUTSIDE_HIERARCHY, "You can only send to accounts directly below you.");
-        }
-        if (!receiver.isActive()) {
-            throw new BusinessException(ErrorCode.ACCOUNT_INACTIVE, receiver.getAccountCode() + " is " + receiver.getStatus().name().toLowerCase() + " and can't receive funds.");
-        }
-        ServiceDefinition service = services.requireEnabled(ServiceDefinition.WALLET_TRANSFER);
-        BigDecimal fee = Money.of(service.getFeeAmount());
-
-        Wallet senderWallet = walletService.getOrCreate(sender);
-        Wallet receiverWallet = walletService.getOrCreate(receiver);
-        Map<Long, Wallet> locked = walletService.lockAll(List.of(senderWallet, receiverWallet));
-        Wallet from = locked.get(senderWallet.getId());
-        Wallet to = locked.get(receiverWallet.getId());
-
-        String hash = TransactionRecorder.hash("TRANSFER", receiverId, amount, remarks);
-        Optional<FinancialTransaction> replay = recorder.findReplay(sender.getId(), idempotencyKey, hash);
-        if (replay.isPresent()) {
-            return replay.get();
-        }
-
-        limits.check(sender, ServiceDefinition.WALLET_TRANSFER, amount);
-        if (from.getAvailableBalance().compareTo(amount.add(fee)) < 0) {
-            throw new BusinessException(ErrorCode.INSUFFICIENT_BALANCE, "You tried to send " + Money.format(amount)
-                    + " but have " + Money.format(from.getAvailableBalance()) + " available.");
-        }
-
-        FinancialTransaction txn = recorder.create(TxnType.WALLET_TRANSFER, ServiceDefinition.WALLET_TRANSFER, sender.getId(),
-                amount, fee, idempotencyKey, hash, "Transfer requested; limits and balance checked");
-        txn.setSourceAccountId(sender.getId());
-        txn.setTargetAccountId(receiver.getId());
-        txn.setRemarks(remarks);
-        ledger.debit(from, txn, amount, "TRANSFER_OUT", "Transfer to " + receiver.getAccountCode());
-        if (fee.signum() > 0) {
-            ledger.debit(from, txn, fee, "FEE", "Transfer fee");
-        }
-        ledger.credit(to, txn, amount, "TRANSFER_IN", "Transfer from " + sender.getAccountCode());
-        recorder.move(txn, TxnStatus.SUCCESS, "Debit and credit committed together", sender.getId());
-
-        audit.record(sender, "WALLET_TRANSFER", "TRANSACTION", txn.getReferenceNo(),
-                "amount=" + amount.toPlainString() + " to=" + receiver.getAccountCode());
-        notifications.notify(sender.getId(), NotificationService.MONEY, "Transfer sent",
-                Money.format(amount) + " sent to " + receiver.getAccountCode() + " · " + receiver.getDisplayName() + ". Ref " + txn.getReferenceNo() + ".",
-                "/transactions/" + txn.getId());
-        notifications.notify(receiver.getId(), NotificationService.MONEY, "Wallet credited",
-                Money.format(amount) + " received from " + sender.getAccountCode() + ". Ref " + txn.getReferenceNo() + ".",
-                "/wallet");
-        return txn;
-    }
-
     /** A load request is PENDING until a Platform Admin matches the bank payment and approves it. */
     @Transactional
     public FinancialTransaction requestLoad(AgentAccount requester, BigDecimal rawAmount, String mode, String utr, String idempotencyKey) {
         BigDecimal amount = Money.of(rawAmount);
         if (requester.getRole() == AccountRole.ADMIN || requester.getRole() == AccountRole.RETAILER) {
-            throw new BusinessException(ErrorCode.ACCESS_DENIED, "Your role can't request wallet loads. Ask your distributor to transfer funds.");
+            throw new BusinessException(ErrorCode.ACCESS_DENIED, "Your role can't request wallet loads. Use Add funds to top up your wallet.");
         }
         services.requireEnabled(ServiceDefinition.WALLET_LOAD);
         Wallet wallet = walletService.lockOne(walletService.getOrCreate(requester));

@@ -3,6 +3,7 @@ package com.primepay.addfunds;
 import com.primepay.admin.ServiceDefinition;
 import com.primepay.admin.ServiceDefinitionRepository;
 import com.primepay.audit.AuditService;
+import com.primepay.commission.CommissionEngine;
 import com.primepay.common.Money;
 import com.primepay.common.error.BusinessException;
 import com.primepay.common.error.ErrorCode;
@@ -54,13 +55,14 @@ public class AddFundsService {
     private final PasswordEncoder encoder;
     private final NotificationService notifications;
     private final AuditService audit;
+    private final CommissionEngine commission;
     private final boolean devOtp;
     private final SecureRandom random = new SecureRandom();
 
     public AddFundsService(GatewayCategoryRepository categories, PaymentSessionRepository sessions, PaymentGateway gateway,
                            AgentAccountRepository accounts, WalletService walletService, LedgerService ledger, TransactionRecorder recorder,
                            LimitService limits, ServiceDefinitionRepository services, PasswordEncoder encoder,
-                           NotificationService notifications, AuditService audit,
+                           NotificationService notifications, AuditService audit, CommissionEngine commission,
                            @Value("${app.onboarding.otp.dev-mode:false}") boolean devOtp) {
         this.categories = categories;
         this.sessions = sessions;
@@ -74,6 +76,7 @@ public class AddFundsService {
         this.encoder = encoder;
         this.notifications = notifications;
         this.audit = audit;
+        this.commission = commission;
         this.devOtp = devOtp;
     }
 
@@ -84,6 +87,52 @@ public class AddFundsService {
                               String cardLast4, String paymentMode, String upiMasked, BigDecimal amount, BigDecimal charge,
                               BigDecimal netAmount, String status, String failureReason, Long transactionId, String referenceNo,
                               OffsetDateTime expiresAt, String devOtp) {
+    }
+
+    /** One deduction from a top-up: the gateway, or a level above the loading account (PLATFORM = Platform Admin). */
+    public record ChargeLine(String label, String levelRole, String accountCode, BigDecimal percent, BigDecimal amount) {
+    }
+
+    /** What happens to a top-up: the gateway charge, each upline level's margin, and what reaches the wallet. */
+    public record Breakdown(BigDecimal amount, List<ChargeLine> lines, BigDecimal totalCharges, BigDecimal credited) {
+    }
+
+    /** Preview of the charges for this account, category and amount (no money moves). */
+    @Transactional(readOnly = true)
+    public Breakdown preview(AgentAccount actor, String categoryCode, BigDecimal rawAmount) {
+        AgentAccount me = requireRetailer(actor);
+        GatewayCategory category = categories.findByCode(categoryCode).filter(GatewayCategory::isEnabled)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "Choose a gateway category."));
+        return breakdown(me, category, Money.of(rawAmount));
+    }
+
+    /**
+     * Gateway charge first, then the commission chain upwards: every level above the loading account keeps its
+     * configured share (rule for ADD_FUNDS) and the Platform Admin keeps the platform share. The loading account
+     * gets the rest; nothing moves to accounts below it.
+     */
+    private Breakdown breakdown(AgentAccount me, GatewayCategory category, BigDecimal amount) {
+        List<ChargeLine> lines = new java.util.ArrayList<>();
+        BigDecimal gw = category.chargeFor(amount);
+        lines.add(new ChargeLine("Payment gateway (" + category.getName() + ")", "GATEWAY", null, category.getChargePercent(), gw));
+        BigDecimal total = gw;
+        for (CommissionEngine.Split sp : commission.uplineSplit(ServiceDefinition.ADD_FUNDS, amount, me)) {
+            BigDecimal pct = amount.signum() == 0 ? BigDecimal.ZERO
+                    : sp.amount().multiply(BigDecimal.valueOf(100)).divide(amount, 4, java.math.RoundingMode.HALF_UP).stripTrailingZeros();
+            String label = "PLATFORM".equals(sp.levelRole()) ? "Platform Admin" : levelLabel(sp.levelRole());
+            lines.add(new ChargeLine(label, sp.levelRole(), sp.earner() == null ? null : sp.earner().getAccountCode(), pct, sp.amount()));
+            total = total.add(sp.amount());
+        }
+        return new Breakdown(amount, lines, total, amount.subtract(total));
+    }
+
+    private static String levelLabel(String role) {
+        return switch (role) {
+            case "SUPER_DISTRIBUTOR" -> "Super Distributor";
+            case "MASTER_DISTRIBUTOR" -> "Master Distributor";
+            case "DISTRIBUTOR" -> "Distributor";
+            default -> role;
+        };
     }
 
     @Transactional(readOnly = true)
@@ -118,7 +167,7 @@ public class AddFundsService {
             throw new BusinessException(ErrorCode.LIMIT_EXCEEDED, category.getName() + " allows " + Money.format(category.getMinAmount())
                     + " to " + Money.format(category.getMaxAmount()) + " per payment.");
         }
-        BigDecimal charge = category.chargeFor(amount);
+        BigDecimal charge = breakdown(retailer, category, amount).totalCharges();
         PaymentSession session = sessions.save(new PaymentSession("PS" + UUID.randomUUID().toString().replace("-", "").substring(0, 20).toUpperCase(),
                 retailer.getId(), category.getCode(), cardNetwork, cardHolder.trim(), amount, charge, OffsetDateTime.now().plus(SESSION_LIFETIME)));
         return view(session, category, null, null);
@@ -189,10 +238,16 @@ public class AddFundsService {
             return view(s, category, reference(s), null);
         }
 
+        // Charges are settled at today's rule: gateway charge plus each upline level's margin.
+        Breakdown split = breakdown(retailer, category, s.getAmount());
+        s.setCharge(split.totalCharges());
+        s.setNetAmount(split.credited());
         FinancialTransaction txn = newTxn(retailer, s, category);
         ledger.credit(wallet, txn, s.getNetAmount(), "ADD_FUNDS", "Add funds via " + category.getName() + " gateway (" + describe(s) + "), after "
-                + Money.format(s.getCharge()) + " charge");
+                + Money.format(s.getCharge()) + " gateway charge and upline margins");
         recorder.move(txn, TxnStatus.SUCCESS, "Gateway approved · ref " + result.gatewayRef(), retailer.getId());
+        // The margins go up the chain only: every level above the loading account, and the platform share.
+        commission.distribute(txn, retailer, true);
         s.setStatus("SUCCESS");
         s.setTransactionId(txn.getId());
         s.setOtpHash(null);

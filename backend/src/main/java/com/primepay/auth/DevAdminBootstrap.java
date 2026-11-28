@@ -11,6 +11,7 @@ import com.primepay.user.AgentAccountRepository;
 import com.primepay.user.CreateAccountRequest;
 import com.primepay.user.UserService;
 import com.primepay.wallet.TransferService;
+import com.primepay.addfunds.AddFundsService;
 import java.math.BigDecimal;
 import java.security.SecureRandom;
 import java.util.ArrayList;
@@ -46,6 +47,7 @@ public class DevAdminBootstrap implements ApplicationRunner {
     private final PasswordEncoder passwordEncoder;
     private final UserService userService;
     private final TransferService transfers;
+    private final AddFundsService addFunds;
     private final BeneficiaryService beneficiaries;
     private final BillPaymentService bills;
     private final TransactionTemplate tx;
@@ -60,6 +62,7 @@ public class DevAdminBootstrap implements ApplicationRunner {
             PasswordEncoder passwordEncoder,
             UserService userService,
             TransferService transfers,
+            AddFundsService addFunds,
             BeneficiaryService beneficiaries,
             BillPaymentService bills,
             TransactionTemplate tx,
@@ -72,6 +75,7 @@ public class DevAdminBootstrap implements ApplicationRunner {
         this.passwordEncoder = passwordEncoder;
         this.userService = userService;
         this.transfers = transfers;
+        this.addFunds = addFunds;
         this.beneficiaries = beneficiaries;
         this.bills = bills;
         this.tx = tx;
@@ -134,9 +138,10 @@ public class DevAdminBootstrap implements ApplicationRunner {
             FinancialTransaction load = transfers.requestLoad(sd, new BigDecimal("1000000.00"), "NEFT", "SEEDUTR0001", key());
             transfers.decideLoad(admin, load.getId(), true, "Seed data: bank payment matched");
             transfers.requestLoad(sd, new BigDecimal("250000.00"), "RTGS", "SEEDUTR0002", key());
-            transfers.transfer(sd, md.getId(), new BigDecimal("500000.00"), "Opening float", key());
-            transfers.transfer(md, dt.getId(), new BigDecimal("200000.00"), "Opening float", key());
-            transfers.transfer(dt, rt.getId(), new BigDecimal("50000.00"), "Opening float", key());
+            // Each account funds its own wallet through the (simulated) gateway; the levels above earn their margins.
+            topUp(md, new BigDecimal("200000.00"));
+            topUp(dt, new BigDecimal("100000.00"));
+            topUp(rt, new BigDecimal("50000.00"));
             // Saved bank accounts (verified by the simulated bank), then withdrawals to them.
             Long suresh = beneficiaries.add(rt, "123456784410", "SBIN0001234", "Suresh Kumar").beneficiary().id();
             Long anita = beneficiaries.add(rt, "998877660921", "FDRL0001234", "Anita George").beneficiary().id();
@@ -149,6 +154,12 @@ public class DevAdminBootstrap implements ApplicationRunner {
         } catch (RuntimeException e) {
             logger.warn("DEV ONLY: sample activity could not be created: {}", e.getMessage());
         }
+    }
+
+    private void topUp(AgentAccount account, BigDecimal amount) {
+        String ref = addFunds.start(account, "EDU", "VISA", account.getDisplayName(), amount).sessionRef();
+        addFunds.choosePaymentMode(account, ref, "UPI", null, "seed.topup@okbank");
+        addFunds.complete(account, ref, null, "seed.topup@okbank");
     }
 
     private static String key() {

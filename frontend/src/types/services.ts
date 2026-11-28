@@ -55,3 +55,11 @@ export interface Beneficiary {
 export interface AddBeneficiaryResult { beneficiary: Beneficiary; verified: boolean; reason: string | null }
 
 export const NETWORK_LABEL: Record<CardNetwork, string> = { VISA: 'Visa', MASTERCARD: 'Mastercard', RUPAY: 'RuPay' }
+
+/** Where a top-up goes: gateway charge, each upline level's margin (PLATFORM = Platform Admin), and what is credited. */
+export interface AddFundsBreakdown {
+  amount: number
+  lines: { label: string; levelRole: string; accountCode: string | null; percent: number; amount: number }[]
+  totalCharges: number
+  credited: number
+}

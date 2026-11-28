@@ -45,8 +45,8 @@ class MandatoryScenariosTest {
 
     String admin, admin2, sd, md, dt, dt2, rt, rt2;
     long adminId, sdId, mdId, dtId, dt2Id, rtId, rt2Id;
-    String transferRef;
-    long transferTxnId;
+    String fundRef;
+    long loadTxnId, hdfcId;
 
     @Test @Order(1)
     void s01_to_s04_eachLevelCreatesTheLevelBelow() throws Exception {
@@ -91,114 +91,107 @@ class MandatoryScenariosTest {
     @Test @Order(4)
     void s07_distributorCannotAccessAnotherDistributorsRetailer() throws Exception {
         call(get("/api/v1/users/" + rt2Id), dt, 404);
-        JsonNode denied = call(transfer(rt2Id, "100.00", key()), dt, 403);
-        assertThat(denied.at("/error/code").asText()).isEqualTo("OUTSIDE_HIERARCHY");
         call(patch("/api/v1/users/" + rt2Id + "/status").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"SUSPENDED\",\"reason\":\"test\"}"), dt, 404);
+        // Money never moves down the chain: the transfer API no longer exists.
+        call(post("/api/v1/wallets/transfer").header("Idempotency-Key", key()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"toAccountId\":" + rtId + ",\"amount\":100}"), dt, 405);
     }
 
     @Test @Order(5)
-    void s08_to_s10_fundsFlowDownTheHierarchy() throws Exception {
+    void s08_to_s10_eachLevelFundsItsOwnWalletAndUplinesEarnMargins() throws Exception {
+        // The Super Distributor's bank load (approved by the Admin) reaches the Super Distributor only.
         JsonNode load = call(post("/api/v1/wallets/load").header("Idempotency-Key", key()).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"amount\":1000000,\"mode\":\"NEFT\",\"utr\":\"UTR123456\"}"), sd, 201);
         assertThat(load.at("/data/status").asText()).isEqualTo("PENDING");
         call(post("/api/v1/transactions/" + load.at("/data/id").asLong() + "/approve-load"), admin, 200);
+        loadTxnId = load.at("/data/id").asLong();
         assertThat(balance(sd)).isEqualByComparingTo("1000000.00");
+        assertThat(balance(md)).isZero();
+        assertThat(balance(dt)).isZero();
+        assertThat(balance(rt)).isZero();
 
-        call(transfer(mdId, "300000.00", key()), sd, 201);       // 8
-        call(transfer(dtId, "100000.00", key()), md, 201);       // 9
-        JsonNode t = call(transfer(rtId, "20000.00", key()), dt, 201); // 10
-        transferRef = t.at("/data/referenceNo").asText();
-        transferTxnId = t.at("/data/id").asLong();
-        assertThat(balance(sd)).isEqualByComparingTo("700000.00");
-        assertThat(balance(md)).isEqualByComparingTo("200000.00");
-        assertThat(balance(dt)).isEqualByComparingTo("80000.00");
-        assertThat(balance(rt)).isEqualByComparingTo("20000.00");
-
-        // Only to direct children: Super can't skip a level.
-        call(transfer(dtId, "10.00", key()), sd, 403);
+        // Add funds: gateway 2%, then 0.5% kept by each level ABOVE the account that loads.
+        fundRef = topUp(rt, "20000");                                  // 20000 - 400 - 4 x 100
+        assertThat(balance(rt)).isEqualByComparingTo("19200.00");
+        assertThat(balance(dt)).isEqualByComparingTo("100.00");
+        assertThat(balance(md)).isEqualByComparingTo("100.00");
+        assertThat(balance(sd)).isEqualByComparingTo("1000100.00");
+        topUp(dt, "10000");                                             // 10000 - 200 - 3 x 50 = 9650
+        assertThat(balance(dt)).isEqualByComparingTo("9750.00");       // its earlier 100 margin + 9650
+        assertThat(balance(rt)).isEqualByComparingTo("19200.00");      // nothing moves down
+        assertThat(balance(md)).isEqualByComparingTo("150.00");
+        assertThat(balance(sd)).isEqualByComparingTo("1000150.00");
     }
 
     @Test @Order(6)
     void s11_s12_retailerPayoutDistributesCommission() throws Exception {
-        long hdfc = addAccount(rt, "123456789012", "Test Customer");
-        JsonNode payout = call(withdraw(hdfc, "10000", "NEFT"), rt, 201);
+        hdfcId = addAccount(rt, "123456789012", "Test Customer");
+        JsonNode payout = call(withdraw(hdfcId, "10000", "NEFT", key()), rt, 201);
         assertThat(payout.at("/data/status").asText()).isEqualTo("SUCCESS");
         assertThat(payout.at("/data/beneficiaryAccountLast4").asText()).isEqualTo("9012");
-        // 20000 - 10000 - 10 fee + 0.10% commission (10.00)
-        assertThat(balance(rt)).isEqualByComparingTo("10000.00");
-        JsonNode detail = call(get("/api/v1/transactions/" + payout.at("/data/id").asLong()), rt, 200);
-        assertThat(detail.at("/data/commission").size()).isEqualTo(5);
-        assertThat(call(get("/api/v1/commissions/statement"), dt, 200).at("/data/creditedThisMonth").decimalValue())
-                .isEqualByComparingTo("20.00"); // 0.20%
-        assertThat(call(get("/api/v1/commissions/statement"), md, 200).at("/data/creditedThisMonth").decimalValue())
-                .isEqualByComparingTo("15.00"); // 0.15%
+        // 19200 - 10000 - 10 fee + 0.10% commission (10.00)
+        assertThat(balance(rt)).isEqualByComparingTo("9200.00");
+        JsonNode commission = call(get("/api/v1/transactions/" + payout.at("/data/id").asLong()), admin, 200).at("/data/commission");
+        assertThat(commission.size()).isEqualTo(5);
+        assertThat(shareOf(commission, "DISTRIBUTOR")).isEqualByComparingTo("20.00");          // 0.20%
+        assertThat(shareOf(commission, "MASTER_DISTRIBUTOR")).isEqualByComparingTo("15.00");   // 0.15%
 
         // A second successful payout also earns commission (regression: system transactions must not share a NULL key).
-        call(withdraw(addAccount(rt, "123456789099", "Second Customer"), "1000", "IMPS"), rt, 201);
-        assertThat(balance(rt)).isEqualByComparingTo("8991.00"); // 10000 - 1000 - 10 fee + 1.00 commission (0.10%)
+        call(withdraw(addAccount(rt, "123456789099", "Second Customer"), "1000", "IMPS", key()), rt, 201);
+        assertThat(balance(rt)).isEqualByComparingTo("8191.00"); // 9200 - 1000 - 10 fee + 1.00 commission (0.10%)
         // A declined payout refunds amount and fee: net balance unchanged.
-        JsonNode failed = call(withdraw(addAccount(rt, "123456780000", "Closed Account"), "500", "IMPS"), rt, 201);
+        JsonNode failed = call(withdraw(addAccount(rt, "123456780000", "Closed Account"), "500", "IMPS", key()), rt, 201);
         assertThat(failed.at("/data/status").asText()).isEqualTo("FAILED");
-        assertThat(balance(rt)).isEqualByComparingTo("8991.00");
+        assertThat(balance(rt)).isEqualByComparingTo("8191.00");
     }
 
     @Test @Order(7)
     void s13_insufficientBalanceChangesNothing() throws Exception {
-        BigDecimal before = balance(dt), receiver = balance(rt);
-        JsonNode r = call(transfer(rtId, "150000.00", key()), dt, 422); // within the 2,00,000 per-transfer limit, above the balance
+        BigDecimal before = balance(rt);
+        JsonNode r = call(withdraw(hdfcId, "40000", "NEFT", key()), rt, 422); // within the per-payout limit, above the balance
         assertThat(r.at("/error/code").asText()).isEqualTo("INSUFFICIENT_BALANCE");
-        assertThat(balance(dt)).isEqualByComparingTo(before);
-        assertThat(balance(rt)).isEqualByComparingTo(receiver);
+        assertThat(balance(rt)).isEqualByComparingTo(before);
     }
 
     @Test @Order(8)
-    void s14_duplicateTransferDoesNotDebitTwice() throws Exception {
-        BigDecimal before = balance(dt);
+    void s14_duplicateRequestDoesNotDebitTwice() throws Exception {
+        BigDecimal before = balance(rt);
         String k = key();
-        String ref1 = call(transfer(rtId, "1000.00", k), dt, 201).at("/data/referenceNo").asText();
-        String ref2 = call(transfer(rtId, "1000.00", k), dt, 201).at("/data/referenceNo").asText();
+        String ref1 = call(withdraw(hdfcId, "100", "IMPS", k), rt, 201).at("/data/referenceNo").asText();
+        String ref2 = call(withdraw(hdfcId, "100", "IMPS", k), rt, 201).at("/data/referenceNo").asText();
         assertThat(ref2).isEqualTo(ref1);
-        assertThat(balance(dt)).isEqualByComparingTo(before.subtract(new BigDecimal("1000.00")));
+        // 100 + 10 fee - 0.10 commission, once
+        assertThat(balance(rt)).isEqualByComparingTo(before.subtract(new BigDecimal("109.90")));
         // Same key, different request: refused.
-        assertThat(call(transfer(rtId, "2000.00", k), dt, 409).at("/error/code").asText()).isEqualTo("IDEMPOTENCY_CONFLICT");
+        assertThat(call(withdraw(hdfcId, "200", "IMPS", k), rt, 409).at("/error/code").asText()).isEqualTo("IDEMPOTENCY_CONFLICT");
     }
 
     @Test @Order(9)
     void s15_reversalPostsCompensatingEntries() throws Exception {
-        // The retailer already spent most of the first transfer: reversing it is refused and nothing changes.
-        BigDecimal rtNow = balance(rt);
-        JsonNode refused = call(post("/api/v1/transactions/" + transferTxnId + "/reverse").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"reason\":\"test\"}"), admin, 422);
-        assertThat(refused.at("/error/code").asText()).isEqualTo("INSUFFICIENT_BALANCE");
-        assertThat(balance(rt)).isEqualByComparingTo(rtNow);
-
-        JsonNode fresh = call(transfer(rtId, "3000.00", key()), dt, 201);
-        long freshId = fresh.at("/data/id").asLong();
-        transferRef = fresh.at("/data/referenceNo").asText();
-        BigDecimal dtBefore = balance(dt), rtBefore = balance(rt);
-        call(post("/api/v1/transactions/" + freshId + "/reverse").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"reason\":\"Sent to wrong retailer\"}"), dt, 403); // only admin
-        JsonNode reversal = call(post("/api/v1/transactions/" + freshId + "/reverse").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"reason\":\"Sent to wrong retailer\"}"), admin, 200);
+        BigDecimal sdBefore = balance(sd);
+        call(post("/api/v1/transactions/" + loadTxnId + "/reverse").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"Bank payment returned\"}"), sd, 403); // only admin
+        JsonNode reversal = call(post("/api/v1/transactions/" + loadTxnId + "/reverse").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"Bank payment returned\"}"), admin, 200);
         assertThat(reversal.at("/data/type").asText()).isEqualTo("REVERSAL");
-        assertThat(balance(dt)).isEqualByComparingTo(dtBefore.add(new BigDecimal("3000.00")));
-        assertThat(balance(rt)).isEqualByComparingTo(rtBefore.subtract(new BigDecimal("3000.00")));
-        JsonNode original = call(get("/api/v1/transactions/" + freshId), admin, 200);
+        assertThat(balance(sd)).isEqualByComparingTo(sdBefore.subtract(new BigDecimal("1000000.00")));
+        JsonNode original = call(get("/api/v1/transactions/" + loadTxnId), admin, 200);
         assertThat(original.at("/data/transaction/status").asText()).isEqualTo("REVERSED");
-        assertThat(original.at("/data/ledger").size()).isEqualTo(2); // original lines untouched
+        int originalLines = original.at("/data/ledger").size();
+        assertThat(originalLines).isPositive(); // original lines untouched
         JsonNode reversalDetail = call(get("/api/v1/transactions/" + reversal.at("/data/id").asLong()), admin, 200);
-        assertThat(reversalDetail.at("/data/ledger").size()).isEqualTo(2); // compensating DR + CR
-        call(post("/api/v1/transactions/" + freshId + "/reverse").contentType(MediaType.APPLICATION_JSON)
+        assertThat(reversalDetail.at("/data/ledger").size()).isEqualTo(originalLines); // one compensating line each
+        call(post("/api/v1/transactions/" + loadTxnId + "/reverse").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"reason\":\"again\"}"), admin, 409); // already reversed
     }
 
     @Test @Order(10)
     void s16_dailyLimitViolationIsRejected() throws Exception {
         call(post("/api/v1/limits/overrides").contentType(MediaType.APPLICATION_JSON).content("""
-                {"accountId": %d, "serviceCode": "WALLET_TRANSFER", "limit": {"minTxn": 1, "maxTxn": 5000, "dailyAmount": 5000,
-                 "monthlyAmount": 100000, "dailyCount": 100, "monthlyCount": 1000}}""".formatted(dtId)), admin, 200);
-        JsonNode r = call(transfer(rtId, "4999.00", key()), dt, 422);
+                {"accountId": %d, "serviceCode": "PAYOUT", "limit": {"minTxn": 1, "maxTxn": 12000, "dailyAmount": 12000,
+                 "monthlyAmount": 100000, "dailyCount": 100, "monthlyCount": 1000}}""".formatted(rtId)), admin, 200);
+        JsonNode r = call(withdraw(hdfcId, "1000", "IMPS", key()), rt, 422); // 11,100 already paid out today
         assertThat(r.at("/error/code").asText()).isEqualTo("LIMIT_EXCEEDED");
         assertThat(r.at("/error/message").asText()).contains("Daily limit");
     }
@@ -209,10 +202,12 @@ class MandatoryScenariosTest {
         call(patch("/api/v1/users/" + rt2Id + "/status").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"status\":\"SUSPENDED\",\"reason\":\"KYC expired\"}"), dt2, 200);
         // The token issued before suspension stops working for money.
-        JsonNode r = call(withdraw(rt2Account, "100", "IMPS"), rt2, 422);
+        JsonNode r = call(withdraw(rt2Account, "100", "IMPS", key()), rt2, 422);
         assertThat(r.at("/error/code").asText()).isEqualTo("ACCOUNT_INACTIVE");
-        // Nor can anyone send money to it.
-        assertThat(call(transfer(rt2Id, "100.00", key()), dt2, 422).at("/error/code").asText()).isEqualTo("ACCOUNT_INACTIVE");
+        // Nor can it add funds.
+        assertThat(call(post("/api/v1/add-funds/sessions").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"categoryCode\":\"EDU\",\"cardNetwork\":\"VISA\",\"cardHolder\":\"Test Holder\",\"amount\":1000}"), rt2, 422)
+                .at("/error/code").asText()).isEqualTo("ACCOUNT_INACTIVE");
         // And it can't sign in.
         MvcResult login = mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"username\":\"t.retail2\",\"password\":\"" + PW + "\"}")).andReturn();
@@ -222,10 +217,10 @@ class MandatoryScenariosTest {
     @Test @Order(12)
     void s18_everyFinancialOperationAppearsInReportsAndAuditAndBooksBalance() throws Exception {
         JsonNode report = call(get("/api/v1/reports/transactions"), admin, 200);
-        assertThat(report.at("/data/rows").toString()).contains(transferRef);
+        assertThat(report.at("/data/rows").toString()).contains(fundRef);
         JsonNode auditLog = call(get("/api/v1/audit?size=100"), admin, 200);
         String audit = auditLog.at("/data/items").toString();
-        assertThat(audit).contains("WALLET_TRANSFER").contains("PAYOUT").contains("TRANSACTION_REVERSE")
+        assertThat(audit).contains("ADD_FUNDS").contains("PAYOUT").contains("TRANSACTION_REVERSE")
                 .contains("WALLET_LOAD_APPROVE").contains("USER_STATUS_CHANGE").contains("LIMIT_OVERRIDE");
         call(get("/api/v1/audit"), sd, 403);
         JsonNode recon = call(get("/api/v1/reports/reconciliation"), admin, 200);
@@ -273,14 +268,27 @@ class MandatoryScenariosTest {
         return r.at("/data/beneficiary/id").asLong();
     }
 
-    private MockHttpServletRequestBuilder withdraw(long beneficiaryId, String amount, String mode) {
-        return post("/api/v1/withdraw").header("Idempotency-Key", key()).contentType(MediaType.APPLICATION_JSON)
+    private MockHttpServletRequestBuilder withdraw(long beneficiaryId, String amount, String mode, String idempotencyKey) {
+        return post("/api/v1/withdraw").header("Idempotency-Key", idempotencyKey).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"beneficiaryId\":" + beneficiaryId + ",\"amount\":" + amount + ",\"mode\":\"" + mode + "\"}");
     }
 
-    private MockHttpServletRequestBuilder transfer(long to, String amount, String key) {
-        return post("/api/v1/wallets/transfer").header("Idempotency-Key", key).contentType(MediaType.APPLICATION_JSON)
-                .content("{\"toAccountId\":" + to + ",\"amount\":" + amount + ",\"remarks\":\"test\"}");
+    /** Add funds by UPI (no OTP) and return the transaction reference. */
+    private String topUp(String token, String amount) throws Exception {
+        String ref = call(post("/api/v1/add-funds/sessions").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"categoryCode\":\"EDU\",\"cardNetwork\":\"VISA\",\"cardHolder\":\"Test Holder\",\"amount\":" + amount + "}"), token, 201)
+                .at("/data/sessionRef").asText();
+        call(post("/api/v1/add-funds/sessions/" + ref + "/pay").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"mode\":\"UPI\",\"upiId\":\"test.user@okbank\"}"), token, 200);
+        JsonNode done = call(post("/api/v1/add-funds/sessions/" + ref + "/complete").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"upiId\":\"test.user@okbank\"}"), token, 200).at("/data");
+        assertThat(done.at("/status").asText()).isEqualTo("SUCCESS");
+        return done.at("/referenceNo").asText();
+    }
+
+    private static BigDecimal shareOf(JsonNode commission, String level) {
+        for (JsonNode c : commission) if (level.equals(c.at("/levelRole").asText())) return c.at("/amount").decimalValue();
+        throw new AssertionError(level + " share missing");
     }
 
     private BigDecimal balance(String token) throws Exception {

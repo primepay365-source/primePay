@@ -9,7 +9,7 @@ import { errorMessage, useApiData } from '../../hooks/useApiData'
 import { api } from '../../services/api'
 import { colors } from '../../theme/tokens'
 import type { LimitStatus, Transaction, WalletSummary } from '../../types/domain'
-import { NETWORK_LABEL, type CardNetwork, type GatewayCategory, type PaymentSession } from '../../types/services'
+import { NETWORK_LABEL, type AddFundsBreakdown, type CardNetwork, type GatewayCategory, type PaymentSession } from '../../types/services'
 import { money } from '../../utils/format'
 import { MainWalletPanel, RecentList, Steps } from './ServiceParts'
 
@@ -31,11 +31,11 @@ function expired(month: number, year: number): boolean {
   return new Date(2000 + year, month, 1) <= new Date()
 }
 
-const charge = (c: GatewayCategory, amt: number) => Math.round(amt * c.chargePercent) / 100
 
 /**
  * Add funds to the main wallet: gateway category (Ecom, Edu, Travel) → card type, holder, card number, amount →
- * payment page (card or UPI) → OTP → status popup. Amount minus the category charge is credited.
+ * payment page (card or UPI) → OTP → status popup. The gateway keeps its charge and each level above this account
+ * keeps its margin (commission goes up the chain only); the rest is credited. Nothing moves to accounts below.
  * The full card number, expiry and CVV stay in this browser page; only the last 4 digits are sent to PrimePay.
  */
 export function AddFundsPage() {
@@ -61,6 +61,10 @@ export function AddFundsPage() {
   const [error, setError] = useState<string | null>(null)
 
   const amount = Number(amountText)
+  const inRange = !!category && amount >= category.minAmount && amount <= category.maxAmount
+  const preview = useApiData(() => (category && inRange
+    ? api.get<AddFundsBreakdown>('/add-funds/preview', { categoryCode: category.code, amount })
+    : Promise.resolve(null)), [category?.code, amount, inRange])
   const limit = limits.data?.find((l) => l.serviceCode === 'ADD_FUNDS')
   const stepIndex = { category: 0, details: 1, gateway: 2, otp: 3, upi: 3 }[stage]
 
@@ -134,7 +138,7 @@ export function AddFundsPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Services" title="Add funds" subtitle="Top up your main wallet with a card or UPI through the payment gateway. The amount minus the gateway charge for the category is credited." />
+      <PageHeader eyebrow="Services" title="Add funds" subtitle="Top up your main wallet with a card or UPI through the payment gateway. The gateway charge and the margins of the levels above you are deducted; the rest is credited to you." />
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'flex-start' }}>
         <Section sx={{ flex: '2 1 520px', minWidth: 0 }}>
           <Steps steps={['Category', 'Card & amount', 'Payment mode', 'Verify']} active={stepIndex} />
@@ -148,7 +152,7 @@ export function AddFundsPage() {
                     sx={{ display: 'block', textAlign: 'left', p: 2, borderRadius: 2, border: `1px solid ${colors.border}`, '&:hover': { borderColor: colors.indigo600, bgcolor: colors.indigo50 } }}>
                     <Typography sx={{ fontWeight: 800, fontSize: 17 }}>{c.name}</Typography>
                     <Typography variant="body2" color="text.secondary">{money(c.minAmount)} – {money(c.maxAmount)}</Typography>
-                    <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600, color: colors.indigo700 }}>Charge {c.chargePercent}%</Typography>
+                    <Typography variant="body2" sx={{ mt: 0.5, fontWeight: 600, color: colors.indigo700 }}>Gateway charge {c.chargePercent}%</Typography>
                   </ButtonBase>
                 ))}
               </Box>
@@ -172,8 +176,15 @@ export function AddFundsPage() {
               {amount > 0 && (
                 <Box>
                   <ReviewRow label="You pay" value={money(amount)} />
-                  <ReviewRow label={`Gateway charge (${category.chargePercent}%)`} value={money(charge(category, amount))} />
-                  <ReviewRow label="Credited to main wallet" value={money(amount - charge(category, amount))} strong />
+                  {preview.data?.lines.map((l) => (
+                    <ReviewRow key={l.levelRole} label={`${l.label}${l.accountCode ? ' · ' + l.accountCode : ''} (${l.percent}%)`} value={`− ${money(l.amount)}`} />
+                  ))}
+                  {preview.data && <ReviewRow label="Credited to your main wallet" value={money(preview.data.credited)} strong />}
+                  {preview.data && preview.data.lines.length > 1 && (
+                    <Typography variant="caption" color="text.secondary">
+                      Commission goes up the chain only: each level above you keeps its margin. Nothing goes to accounts below you.
+                    </Typography>
+                  )}
                 </Box>
               )}
               {(holder || cardNumber || amountText) && detailProblems.length > 0 && <Alert severity="warning">{detailProblems[0]}</Alert>}

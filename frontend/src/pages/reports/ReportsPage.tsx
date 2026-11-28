@@ -20,7 +20,6 @@ interface ReportDef { key: string; label: string; group: string; roles?: Role[] 
 
 const REPORTS: ReportDef[] = [
   { key: 'wallet-load', label: 'Wallet load', group: 'Wallet', roles: ['ADMIN', 'SUPER_DISTRIBUTOR', 'MASTER_DISTRIBUTOR', 'DISTRIBUTOR'] },
-  { key: 'wallet-transfer', label: 'Wallet transfer', group: 'Wallet' },
   { key: 'transactions', label: 'Transactions', group: 'Transactions' },
   { key: 'bill-payment', label: 'Bill payments', group: 'Services' },
   { key: 'add-funds', label: 'Add funds', group: 'Services' },

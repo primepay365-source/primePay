@@ -158,23 +158,6 @@ public class WalletController {
         return ApiResponse.ok(points);
     }
 
-    public record Recipient(Long accountId, String accountCode, String displayName, String businessName, String role, BigDecimal walletBalance) {
-    }
-
-    @Operation(summary = "Accounts you may transfer to: your direct, active children")
-    @GetMapping("/wallets/transfer/recipients")
-    @Transactional(readOnly = true)
-    public ApiResponse<List<Recipient>> recipients() {
-        AgentAccount me = currentActor.require();
-        List<AgentAccount> children = accounts.findByParent_IdIn(List.of(me.getId())).stream()
-                .filter(AgentAccount::isActive)
-                .sorted(Comparator.comparing(AgentAccount::getDisplayName, String.CASE_INSENSITIVE_ORDER))
-                .toList();
-        Map<Long, BigDecimal> balances = walletService.balancesByAccount(children.stream().map(AgentAccount::getId).toList());
-        return ApiResponse.ok(children.stream().map(c -> new Recipient(c.getId(), c.getAccountCode(), c.getDisplayName(),
-                c.getBusinessName(), c.getRole().name(), balances.getOrDefault(c.getId(), BigDecimal.ZERO))).toList());
-    }
-
     public record LimitStatus(String serviceCode, BigDecimal minTxn, BigDecimal maxTxn, BigDecimal dailyAmount, BigDecimal usedToday,
                               BigDecimal monthlyAmount, BigDecimal usedThisMonth, int dailyCount, long countToday) {
     }
@@ -184,7 +167,7 @@ public class WalletController {
     public ApiResponse<List<LimitStatus>> myLimits() {
         AgentAccount me = currentActor.require();
         List<LimitStatus> result = new ArrayList<>();
-        for (String service : List.of("WALLET_TRANSFER", "WALLET_LOAD", "PAYOUT")) {
+        for (String service : List.of("BILL_PAYMENT", "ADD_FUNDS", "PAYOUT", "WALLET_LOAD")) {
             limits.effective(me, service).ifPresent(l -> {
                 LimitService.Usage u = limits.usage(me.getId(), service);
                 result.add(new LimitStatus(service, l.getMinTxn(), l.getMaxTxn(), l.getDailyAmount(), u.dayAmount(),
@@ -194,27 +177,6 @@ public class WalletController {
         return ApiResponse.ok(result);
     }
 
-    public record TransferBody(@NotNull Long toAccountId,
-                               @NotNull @DecimalMin("1.00") @DecimalMax("100000000.00") @Digits(integer = 17, fraction = 2) BigDecimal amount,
-                               @Size(max = 300) String remarks) {
-    }
-
-    @Operation(summary = "Send money to a direct child. Requires an Idempotency-Key header (UUID).")
-    @PostMapping("/wallets/transfer")
-    @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<TransactionView> transfer(@RequestHeader("Idempotency-Key") @Size(min = 8, max = 80) String idempotencyKey,
-                                                 @Valid @RequestBody TransferBody body) {
-        AgentAccount me = currentActor.require();
-        try {
-            FinancialTransaction txn = transfers.transfer(me, body.toAccountId(), body.amount(), body.remarks(), idempotencyKey);
-            return ApiResponse.ok(TransactionView.of(txn, accounts), "Transfer successful");
-        } catch (BusinessException e) {
-            audit.recordIndependent(me.getId(), me.getAccountCode(), "WALLET_TRANSFER", "ACCOUNT", body.toAccountId(),
-                    e.code() == ErrorCode.ACCESS_DENIED || e.code() == ErrorCode.OUTSIDE_HIERARCHY ? AuditService.DENIED : AuditService.FAILED,
-                    e.code() + ": " + e.getMessage() + " amount=" + body.amount().toPlainString());
-            throw e;
-        }
-    }
 
     public record LoadBody(@NotNull @DecimalMin("1.00") @Digits(integer = 17, fraction = 2) BigDecimal amount,
                            @NotBlank @Pattern(regexp = "NEFT|RTGS|IMPS|UPI") String mode,

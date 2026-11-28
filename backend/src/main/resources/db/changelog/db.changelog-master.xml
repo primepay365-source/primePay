@@ -14,4 +14,5 @@
     <include file="005-platform-core.xml" relativeToChangelogFile="true"/>
     <include file="006-payswitch-services.xml" relativeToChangelogFile="true"/>
     <include file="007-business-all-levels.xml" relativeToChangelogFile="true"/>
+    <include file="008-upline-commission-chain.xml" relativeToChangelogFile="true"/>
 </databaseChangeLog>

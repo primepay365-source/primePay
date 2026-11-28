@@ -53,6 +53,8 @@ async function apiPost(token, path, data) {
   const body = await r.text()
   return { status: r.status, body: body ? JSON.parse(body) : null }
 }
+const ORDER = ['SUPER_DISTRIBUTOR', 'MASTER_DISTRIBUTOR', 'DISTRIBUTOR', 'RETAILER']
+const LEVEL_LABEL = { SUPER_DISTRIBUTOR: 'Super Distributor', MASTER_DISTRIBUTOR: 'Master Distributor', DISTRIBUTOR: 'Distributor', RETAILER: 'Retailer' }
 const money = (s) => Number(String(s).replace(/[^0-9.-]/g, ''))
 const round2 = (n) => Math.round(n * 100) / 100
 
@@ -291,6 +293,11 @@ try {
   await shot('sd-dashboard-empty', 'Super Distributor dashboard (new account)')
   const md = await createUserViaUi('Super Distributor', 'MASTER_DISTRIBUTOR', 'Master Distributor', ['Master Distributor', 'Distributor', 'Retailer'], `qa.md.${RUN.toLowerCase()}`)
   check('Hierarchy', 'New Master Distributor is linked to the Super Distributor', sd.code, md.parent)
+  // A Retailer created directly under the Super Distributor (allowed for every level).
+  const direct = await createUserViaUi('Super Distributor', 'RETAILER', 'Retailer', ['Master Distributor', 'Distributor', 'Retailer'], `qa.rs.${RUN.toLowerCase()}`)
+  evidence.users.pop()
+  evidence.directRetailer = direct
+  check('Hierarchy', 'A Retailer can be created directly under the Super Distributor', sd.code, direct.parent)
   await signOut()
 
   // 8-9. Master creates Distributor
@@ -309,57 +316,70 @@ try {
   check('Hierarchy', 'New Retailer is linked to the Distributor', dt.code, rt.parent)
   await signOut()
 
-  // ---------------------------------------------------------------- Wallet funding down the chain
-  const LOAD = 500000
+  // ---------------------------------------------------------------- Add funds: commission goes UP the chain only
   const balanceOf = async (u) => Number((await apiGet(await apiLogin(u.username, NEW_PW), '/wallets/me')).body.data.availableBalance)
-  await login(sd.username, NEW_PW, 'Super Distributor')
-  await go('/wallet')
-  await caption('Wallet funding: the Super Distributor requests a ₹5,00,000 wallet load (bank payment, simulated)')
-  await page.getByRole('button', { name: 'Load wallet' }).click()
-  await page.getByRole('dialog').waitFor()
-  await page.getByRole('dialog').getByRole('spinbutton', { name: 'Amount (₹)' }).fill(String(LOAD))
-  await page.getByRole('textbox', { name: /UTR/ }).fill(`QAUTR${RUN}01`)
-  await pause(1200)
-  await page.getByRole('button', { name: 'Submit load request' }).click()
-  await pause(2000)
-  await shot('sd-load-request', 'Super Distributor · wallet load request')
-  await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
-  const pendingLoad = (await apiGet(adminToken, '/transactions?type=WALLET_LOAD&status=PENDING&size=50')).body.data.items.find((t) => t.initiatorCode === sd.code)
-  check('Wallet funding', 'Super Distributor load request waits for Admin approval', 'PENDING', pendingLoad?.status ?? null, { actual: pendingLoad ? `${pendingLoad.referenceNo} · PENDING` : 'not found' })
-  await signOut()
+  const chainUsers = [sd, md, dt, rt]
+  const balances = async () => Object.fromEntries(await Promise.all(chainUsers.map(async (u) => [u.role, await balanceOf(u)])))
+  const runTxns = []
+  evidence.commission.addFundsChain = []
 
-  await login('admin@primepay.local', env.QA_ADMIN_PASSWORD, 'Platform Admin')
-  await go(`/transactions/${pendingLoad.id}`)
-  await caption('The Platform Admin matches the bank payment and approves the load (maker-checker)')
-  await page.getByRole('button', { name: 'Approve load' }).click()
-  await pause(1200)
-  await page.getByRole('button', { name: 'Approve and credit' }).click()
-  await pause(2200)
-  await shot('admin-approve-load', 'Platform Admin · wallet load approved')
-  check('Wallet funding', `Super Distributor wallet credited ₹${LOAD} after approval`, LOAD, await balanceOf(sd))
-  await signOut()
-
-  async function transferViaUi(from, fromLabel, to, amount) {
-    await login(from.username, NEW_PW, fromLabel)
-    await go('/wallet/transfer')
-    await caption(`${fromLabel} transfers ₹${amount.toLocaleString('en-IN')} to its ${to.roleLabel}`)
-    await page.getByRole('combobox', { name: 'Send to' }).click()
-    await page.getByRole('option', { name: new RegExp(to.code) }).click()
+  /** Adds funds by UPI through the UI, showing the breakdown, and checks who gained what. */
+  async function selfFundViaUi(user, label, category, amount) {
+    await login(user.username, NEW_PW, label)
+    const before = await balances()
+    await go('/add-funds')
+    await caption(`${label} adds ₹${amount.toLocaleString('en-IN')} to its own wallet through the payment gateway`)
+    await page.getByText(category, { exact: true }).click()
+    await page.getByRole('textbox', { name: 'Card holder name' }).fill(`QA ${label} ${RUN}`)
+    await page.getByRole('textbox', { name: 'Card number' }).fill('4111111111111111')
     await page.getByRole('spinbutton', { name: 'Amount (₹)' }).fill(String(amount))
-    await page.getByRole('textbox', { name: 'Remarks (optional)' }).fill('Opening float (QA run)')
+    await page.getByText(/Credited to your main wallet/).waitFor()
+    const shown = await page.locator('text=Credited to your main wallet').locator('..').textContent()
+    await caption('The breakdown: the gateway keeps 2%, each level above keeps 0.5%, the rest is credited',
+      `The gateway keeps 2 percent. Each level above the ${label} keeps half a percent. The rest is credited to the ${label}. Nothing goes to the accounts below.`)
+    await pause(2500)
+    await shot(`addfunds-breakdown-${user.role.toLowerCase()}`, `${label} · add funds breakdown`)
+    await page.getByRole('button', { name: 'Next' }).click()
+    await page.getByText('Secure payment page (simulated gateway)').waitFor()
+    await page.getByRole('button', { name: 'UPI', exact: true }).click()
+    await page.getByRole('textbox', { name: 'UPI ID' }).fill(`qa.${user.role.toLowerCase()}@okbank`)
+    await pause(800)
+    await page.getByRole('button', { name: /^Pay ₹/ }).click()
+    await page.getByText('Approve in your UPI app').waitFor()
     await pause(1000)
-    await page.getByRole('button', { name: 'Review transfer' }).click()
-    await pause(1200)
-    await page.getByRole('button', { name: /^Confirm and send/ }).click()
-    await page.getByRole('heading', { name: / sent$/ }).waitFor()
-    await pause(1800)
-    await shot(`transfer-to-${to.role.toLowerCase()}`, `${fromLabel} · transfer to ${to.roleLabel}`)
-    check('Wallet funding', `${to.roleLabel} received ₹${amount} from the ${fromLabel}`, amount, await balanceOf(to))
+    await page.getByRole('button', { name: 'I have approved it' }).click()
+    await page.getByRole('dialog').waitFor()
+    await pause(2000)
+    const after = await balances()
+    const exp = expectedShares(rules, 'ADD_FUNDS', amount)
+    const cat = (await apiGet(await apiLogin(user.username, NEW_PW), '/add-funds/categories')).body.data.find((c) => c.name === category)
+    const idx = ORDER.indexOf(user.role)
+    const gateway = round2((amount * Number(cat.chargePercent)) / 100)
+    const margins = round2(ORDER.slice(0, idx).reduce((a, l) => a + (exp?.shares[l]?.amount ?? 0), 0) + (exp?.shares.PLATFORM?.amount ?? 0))
+    const credited = round2(amount - gateway - margins)
+    const row = { who: label, role: user.role, amount, gateway, margins, credited, actualCredited: round2(after[user.role] - before[user.role]), uplines: {}, below: {} }
+    check('Add funds chain', `${label} adds ₹${amount}: credited ₹${credited} (gateway ₹${gateway}, margins above ₹${margins})`, credited, row.actualCredited)
+    for (const u of chainUsers) {
+      const j = ORDER.indexOf(u.role)
+      if (j === idx) continue
+      const change = round2(after[u.role] - before[u.role])
+      if (j < idx) {
+        row.uplines[u.role] = change
+        check('Add funds chain', `${LEVEL_LABEL[u.role]} above earns its ₹${exp.shares[u.role].amount} margin on the ${label}'s top-up`, exp.shares[u.role].amount, change)
+      } else {
+        row.below[u.role] = change
+        check('Add funds chain', `${LEVEL_LABEL[u.role]} below the ${label} gets nothing`, 0, change)
+      }
+    }
+    evidence.commission.addFundsChain.push(row)
+    runTxns.push({ service: 'ADD_FUNDS', amount, by: user.role })
+    void shown
+    await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
     await signOut()
   }
-  await transferViaUi(sd, 'Super Distributor', md, 200000)
-  await transferViaUi(md, 'Master Distributor', dt, 100000)
-  await transferViaUi(dt, 'Distributor', rt, 25000)
+  await selfFundViaUi(sd, 'Super Distributor', 'Education', 200000)
+  await selfFundViaUi(md, 'Master Distributor', 'Education', 1000)
+  await selfFundViaUi(dt, 'Distributor', 'Education', 1000)
 
   // ---------------------------------------------------------------- Retailer: dashboard and modules
   await login(rt.username, NEW_PW, 'Retailer')
@@ -416,15 +436,18 @@ try {
   }
   let before = await balanceOf(rt)
   let r1 = await addFundsViaUi({ category: 'Education', amount: 5000, card: '4111111111111111', title: 'Add funds by card: Education category, ₹5,000' })
-  let net = round2(5000 - round2((5000 * Number(r1.cat.chargePercent)) / 100))
-  check('Add funds', `Card top-up of ₹5,000 (Education, ${r1.cat.chargePercent}% charge) credits ₹${net}`, net, round2((await balanceOf(rt)) - before), { popup: r1.text.slice(0, 60) })
+  const chainNet = (amount, pct) => round2(amount - round2((amount * pct) / 100) - ['DISTRIBUTOR', 'MASTER_DISTRIBUTOR', 'SUPER_DISTRIBUTOR', 'PLATFORM'].reduce((a, l) => a + (expectedShares(rules, 'ADD_FUNDS', amount)?.shares[l]?.amount ?? 0), 0))
+  let net = chainNet(5000, Number(r1.cat.chargePercent))
+  check('Add funds', `Card top-up of ₹5,000 (Education): gateway ${r1.cat.chargePercent}% and 0.5% for each of the 4 levels above, credits ₹${net}`, net, round2((await balanceOf(rt)) - before), { popup: r1.text.slice(0, 60) })
+  runTxns.push({ service: 'ADD_FUNDS', amount: 5000, by: 'RETAILER' })
   await shot('rt-add-funds-card', 'Retailer · Add funds by card')
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
 
   before = await balanceOf(rt)
   r1 = await addFundsViaUi({ category: 'E-commerce', amount: 2000, card: '4111111111111111', upi: 'qa.retailer@okbank', title: 'Add funds by UPI: E-commerce category, ₹2,000' })
-  net = round2(2000 - round2((2000 * Number(r1.cat.chargePercent)) / 100))
-  check('Add funds', `UPI top-up of ₹2,000 (E-commerce, ${r1.cat.chargePercent}% charge) credits ₹${net}`, net, round2((await balanceOf(rt)) - before), { popup: r1.text.slice(0, 60) })
+  net = chainNet(2000, Number(r1.cat.chargePercent))
+  check('Add funds', `UPI top-up of ₹2,000 (E-commerce): gateway ${r1.cat.chargePercent}% and the upline margins, credits ₹${net}`, net, round2((await balanceOf(rt)) - before), { popup: r1.text.slice(0, 60) })
+  runTxns.push({ service: 'ADD_FUNDS', amount: 2000, by: 'RETAILER' })
   await shot('rt-add-funds-upi', 'Retailer · Add funds by UPI')
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
 
@@ -457,7 +480,6 @@ try {
     return { text, id, ref: text.match(/PPB\d+/)?.[0] }
   }
   const BILL = 1000
-  const runTxns = []
   before = await balanceOf(rt)
   const b1 = await billViaUi('4321', BILL, `Bill payment: pay a ₹${BILL} credit card bill from the main wallet`)
   const billRef = b1.ref
@@ -466,7 +488,7 @@ try {
   await shot('rt-bill-paid', 'Retailer · bill payment success')
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
   evidence.transactions.push({ ref: billRef, id: billTxnId, type: 'BILL_PAYMENT', amount: BILL, by: rt.code })
-  runTxns.push({ service: 'BILL_PAYMENT', amount: BILL })
+  runTxns.push({ service: 'BILL_PAYMENT', amount: BILL, by: 'RETAILER' })
 
   const b2 = await billViaUi('1111', 500, 'Bill payment that the bank has not confirmed yet: status Pending')
   check('Bill payment', 'Pending bill payment shows the Pending popup', true, /Payment pending/.test(b2.text), { actual: b2.text.slice(0, 60) })
@@ -478,7 +500,7 @@ try {
   check('Bill payment', 'Recheck turns the pending payment into Success', true, await page.getByText('Bill paid').isVisible())
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
   evidence.transactions.push({ ref: b2.ref, id: b2.id, type: 'BILL_PAYMENT', amount: 500, by: rt.code })
-  runTxns.push({ service: 'BILL_PAYMENT', amount: 500 })
+  runTxns.push({ service: 'BILL_PAYMENT', amount: 500, by: 'RETAILER' })
 
   const midBalance = await balanceOf(rt)
   const b3 = await billViaUi('0000', 300, 'A bill payment the biller declines: amount and charge are refunded')
@@ -526,7 +548,7 @@ try {
   await shot('rt-withdraw-done', 'Retailer · withdrawal successful')
   await page.getByRole('dialog').getByRole('button', { name: 'Close' }).click()
   evidence.transactions.push({ ref: wText.match(/PPP\d+/)?.[0], id: wId, type: 'PAYOUT', amount: 2000, by: rt.code })
-  runTxns.push({ service: 'PAYOUT', amount: 2000 })
+  runTxns.push({ service: 'PAYOUT', amount: 2000, by: 'RETAILER' })
 
   for (const [path, text] of [['/transactions', 'Transactions: every bill payment, top-up and withdrawal with its status'], [`/transactions/${billTxnId}`, 'Receipt: status history and the ledger lines'], ['/reports', 'Reports: bill payments, add funds, withdrawals and more, with CSV export'], ['/notifications', 'Notifications for every money movement']]) {
     await go(path)
@@ -535,7 +557,10 @@ try {
   }
 
   // Expected commission per level for everything this run did (only bill payments and withdrawals pay commission).
-  const expectedTotal = (level) => round2(runTxns.reduce((sum, t) => sum + (expectedShares(rules, t.service, t.amount)?.shares[level]?.amount ?? 0), 0))
+  const expectedTotal = (level) => round2(runTxns.reduce((sum, t) => {
+    const earns = t.service === 'ADD_FUNDS' ? ORDER.indexOf(level) < ORDER.indexOf(t.by) : ORDER.indexOf(level) <= ORDER.indexOf(t.by)
+    return sum + (earns ? (expectedShares(rules, t.service, t.amount)?.shares[level]?.amount ?? 0) : 0)
+  }, 0))
   evidence.commission.runTransactions = runTxns.map((t) => ({ ...t, shares: expectedShares(rules, t.service, t.amount) }))
 
   // 17. Commission calculation for the ₹1,000 bill
@@ -696,7 +721,7 @@ try {
   await go('/dashboard')
   const adminAfter = Object.fromEntries((await apiGet(adminToken, '/reports/dashboard')).body.data.network.map((n) => [n.label, n.value]))
   evidence.dashboards.adminAfter = adminAfter
-  check('Dashboard', 'Admin Total users increased by the 4 accounts created in this run', (adminNet['Total users'] ?? 0) + 4, adminAfter['Total users'])
+  check('Dashboard', 'Admin Total users increased by the 5 accounts created in this run', (adminNet['Total users'] ?? 0) + 5, adminAfter['Total users'])
   await caption(`Summary: 4 accounts created through the UI; ${billRef} paid ₹${allocated} commission across 5 levels`)
   await pause(4000)
   await shot('admin-dashboard-final', 'Platform Admin dashboard · end of run')
