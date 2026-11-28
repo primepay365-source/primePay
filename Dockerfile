@@ -27,6 +27,8 @@ WORKDIR /app
 COPY --from=api /workspace/target/primepay-api-*.jar app.jar
 USER primepay
 ENV SPRING_PROFILES_ACTIVE=dev
+# Behind a host proxy (Render, a tunnel): trust X-Forwarded-* so the app sees its public https origin.
+ENV SERVER_FORWARD_HEADERS_STRATEGY=framework
 EXPOSE 8080
 # Hosts such as Render pass the port in $PORT.
 # Sized for a 512 MB instance (measured about 340 MB in use).
