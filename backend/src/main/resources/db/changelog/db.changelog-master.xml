@@ -1,18 +1,186 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<databaseChangeLog
-        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
-        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
-        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.29.xsd">
+<!--
+  PrimePay database migrations (Oracle Database): one changelog, one change set per SQL script.
+  Flow: db.changelog-master.xml -> change set NNN -> scripts/NNN-name.sql -> Oracle.
+  All SQL (tables, indexes, seed rows) lives in scripts/; rollbacks in scripts/rollback/. Liquibase records each
+  change set in DATABASECHANGELOG and serialises runs with DATABASECHANGELOGLOCK.
 
-    <include file="001-create-agent-account.sql" relativeToChangelogFile="true"/>
-    <include file="001-create-agent-account-h2.sql" relativeToChangelogFile="true"/>
-    <include file="002-create-account-user-h2.sql" relativeToChangelogFile="true"/>
-    <include file="002-create-account-user-oracle.sql" relativeToChangelogFile="true"/>
-    <include file="003-create-distributor-onboarding-h2.sql" relativeToChangelogFile="true"/>
-    <include file="003-create-distributor-onboarding-oracle.sql" relativeToChangelogFile="true"/>
-    <include file="005-platform-core.xml" relativeToChangelogFile="true"/>
-    <include file="006-payswitch-services.xml" relativeToChangelogFile="true"/>
-    <include file="007-business-all-levels.xml" relativeToChangelogFile="true"/>
-    <include file="008-upline-commission-chain.xml" relativeToChangelogFile="true"/>
+  To change the schema: add scripts/022-name.sql (+ scripts/rollback/022-name-rollback.sql) and a change set with
+  id="022" at the end of this file. Never edit a script or change set that has already run on a shared database.
+-->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+    https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.29.xsd"
+    logicalFilePath="db/changelog/db.changelog-master.xml">
+
+    <!-- 001: scripts/001-create-agent-account-table.sql -->
+    <changeSet id="001" author="primepay">
+        <sqlFile path="scripts/001-create-agent-account-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/001-create-agent-account-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 002: scripts/002-create-account-user-table.sql -->
+    <changeSet id="002" author="primepay">
+        <sqlFile path="scripts/002-create-account-user-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/002-create-account-user-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 003: scripts/003-create-distributor-onboarding-table.sql -->
+    <changeSet id="003" author="primepay">
+        <sqlFile path="scripts/003-create-distributor-onboarding-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/003-create-distributor-onboarding-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 004: scripts/004-create-user-status-history-table.sql -->
+    <changeSet id="004" author="primepay">
+        <sqlFile path="scripts/004-create-user-status-history-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/004-create-user-status-history-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 005: scripts/005-create-audit-logs-table.sql -->
+    <changeSet id="005" author="primepay">
+        <sqlFile path="scripts/005-create-audit-logs-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/005-create-audit-logs-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 006: scripts/006-create-notifications-table.sql -->
+    <changeSet id="006" author="primepay">
+        <sqlFile path="scripts/006-create-notifications-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/006-create-notifications-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 007: scripts/007-create-otp-verifications-table.sql -->
+    <changeSet id="007" author="primepay">
+        <sqlFile path="scripts/007-create-otp-verifications-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/007-create-otp-verifications-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 008: scripts/008-create-service-master-table.sql -->
+    <changeSet id="008" author="primepay">
+        <sqlFile path="scripts/008-create-service-master-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/008-create-service-master-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 009: scripts/009-create-wallets-table.sql -->
+    <changeSet id="009" author="primepay">
+        <sqlFile path="scripts/009-create-wallets-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/009-create-wallets-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 010: scripts/010-create-transactions-table.sql -->
+    <changeSet id="010" author="primepay">
+        <sqlFile path="scripts/010-create-transactions-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/010-create-transactions-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 011: scripts/011-create-wallet-ledger-table.sql -->
+    <changeSet id="011" author="primepay">
+        <sqlFile path="scripts/011-create-wallet-ledger-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/011-create-wallet-ledger-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 012: scripts/012-create-transaction-status-history-table.sql -->
+    <changeSet id="012" author="primepay">
+        <sqlFile path="scripts/012-create-transaction-status-history-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/012-create-transaction-status-history-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 013: scripts/013-create-wallet-adjustments-table.sql -->
+    <changeSet id="013" author="primepay">
+        <sqlFile path="scripts/013-create-wallet-adjustments-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/013-create-wallet-adjustments-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 014: scripts/014-create-commission-tables.sql -->
+    <changeSet id="014" author="primepay">
+        <sqlFile path="scripts/014-create-commission-tables.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/014-create-commission-tables-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 015: scripts/015-insert-commission-rules.sql -->
+    <changeSet id="015" author="primepay">
+        <sqlFile path="scripts/015-insert-commission-rules.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/015-insert-commission-rules-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 016: scripts/016-create-transaction-limits-table.sql -->
+    <changeSet id="016" author="primepay">
+        <sqlFile path="scripts/016-create-transaction-limits-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/016-create-transaction-limits-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 017: scripts/017-create-billers-table.sql -->
+    <changeSet id="017" author="primepay">
+        <sqlFile path="scripts/017-create-billers-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/017-create-billers-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 018: scripts/018-create-bill-fetches-table.sql -->
+    <changeSet id="018" author="primepay">
+        <sqlFile path="scripts/018-create-bill-fetches-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/018-create-bill-fetches-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 019: scripts/019-create-gateway-categories-table.sql -->
+    <changeSet id="019" author="primepay">
+        <sqlFile path="scripts/019-create-gateway-categories-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/019-create-gateway-categories-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 020: scripts/020-create-payment-sessions-table.sql -->
+    <changeSet id="020" author="primepay">
+        <sqlFile path="scripts/020-create-payment-sessions-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/020-create-payment-sessions-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
+    <!-- 021: scripts/021-create-beneficiaries-table.sql -->
+    <changeSet id="021" author="primepay">
+        <sqlFile path="scripts/021-create-beneficiaries-table.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        <rollback>
+            <sqlFile path="scripts/rollback/021-create-beneficiaries-table-rollback.sql" relativeToChangelogFile="true" splitStatements="true" endDelimiter=";" stripComments="false" encoding="UTF-8"/>
+        </rollback>
+    </changeSet>
+
 </databaseChangeLog>

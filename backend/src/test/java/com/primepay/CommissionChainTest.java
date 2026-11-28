@@ -1,5 +1,7 @@
 package com.primepay;
 
+import com.primepay.support.CapturingOtpSender;
+import com.primepay.support.TestLogin;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -36,7 +38,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
         "app.dev.seed.password=Chain-Seed-Pass-1",
         "app.dev.seed.sample-data=false"
 })
-@ActiveProfiles("dev")
+@ActiveProfiles({"dev", "test"})
 @AutoConfigureMockMvc
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -45,6 +47,7 @@ class CommissionChainTest {
 
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
+    @Autowired CapturingOtpSender otps;
 
     String admin, sd, md, dt, rt;
     long adminId, sdId, mdId, dtId, rtId;
@@ -253,7 +256,7 @@ class CommissionChainTest {
         String username = code.toLowerCase().replace("-", ".");
         return call(post("/api/v1/users").contentType(MediaType.APPLICATION_JSON).content("""
                 {"accountCode":"%s","displayName":"Test %s","role":"%s","parentId":%d,"username":"%s","initialPassword":"%s",
-                 "email":"%s@example.com","mobile":"+919800000000","businessName":"Biz %s"}""".formatted(code, code, role, parentId, username, PW, username, code)),
+                 "email":"%s@example.com","businessName":"Biz %s"}""".formatted(code, code, role, parentId, username, PW, username, code)),
                 token, 201).at("/data/id").asLong();
     }
 
@@ -265,9 +268,6 @@ class CommissionChainTest {
     }
 
     private String login(String username, String password) throws Exception {
-        MvcResult r = mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}")).andReturn();
-        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(200);
-        return json.readTree(r.getResponse().getContentAsString()).get("accessToken").asText();
+        return TestLogin.login(mvc, json, otps, username, password);
     }
 }

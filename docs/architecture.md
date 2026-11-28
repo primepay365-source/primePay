@@ -164,8 +164,8 @@ Every financial `POST` requires an `Idempotency-Key` header (UUID). The full end
 
 | Profile | Database | Purpose |
 |---|---|---|
-| `dev` | H2 in Oracle compatibility mode, in memory | Fast local start with no Docker. Mock adapters. Resets on restart. |
+| `dev` | Oracle (PRIMEPAY schema) | Local development: demo accounts, simulated payment providers; sign-in codes go to the log until SMTP/MSG91 are configured. |
 | `oracle` | Oracle via `SPRING_DATASOURCE_*` | Local Docker Oracle (`docker compose up oracle`) or shared environments. |
-| `test` | H2 (unit/slice) | Test suite. Oracle-specific checks run against the `oracle` profile once Docker is available. |
+| `test` | Oracle (PRIMEPAY_TEST schema, rebuilt per test run) | Automated tests; a test-only sender captures sign-in codes. |
 
-Oracle is the database of record. H2 exists only so the app starts without Docker. Every migration is written for Oracle first, and any H2 variant is marked `dbms:h2`.
+Oracle Database is the only database. Migrations are plain Oracle SQL scripts run by Liquibase through XML changelogs (db/changelog/scripts and db/changelog/changes).

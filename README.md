@@ -7,7 +7,7 @@ A multi-level wallet, distributor-management and commission platform:
 |---|---|---|
 | API | Java 17 · Spring Boot 3.4 · Spring Security (JWT) · JPA/Hibernate · Liquibase · Maven | [`backend/`](backend) |
 | Web | React 19 · TypeScript · Vite · MUI 7 · React Router · Axios · React Hook Form + Zod · Vitest | [`frontend/`](frontend) |
-| Database | Oracle (19c/21c in production; Oracle 23ai Free in Docker locally). H2 in Oracle mode for the quick `dev` profile only | Liquibase changelogs in `backend/src/main/resources/db/changelog` |
+| Database | Oracle Database only (tested on Oracle AI Database 26ai Free; native BOOLEAN needs 23ai or later) | Liquibase: one XML change set per file in `backend/src/main/resources/db/changelog/changes` |
 | Design | PrimePay design canvas: 34 screens, clickable | https://claude.ai/artifact/CgxyRh9mYDPs4guodCBzi3 |
 
 **Status:** Phases 1–10 are built and work end to end on the development database. Every design screen is a working screen backed by the API. Open items are listed at the end of this file. Nothing in development moves real money: payouts, bill payments, the payment gateway and bank verification use simulated providers.
@@ -23,22 +23,92 @@ A multi-level wallet, distributor-management and commission platform:
 - [Security risks and controls](docs/security.md)
 - [Reference platform research](docs/reference-research.md) (not done yet)
 
-## Run locally (no Docker)
+## Database: Oracle
 
-Requirements: JDK 17, Node.js 20+.
+Oracle Database is the only database (no H2). Every table and data change is plain Oracle SQL in its own `.sql` script; one Liquibase changelog runs them in order:
 
-API, using the `dev` profile (in-memory H2 in Oracle mode; data resets on every restart):
+`db.changelog-master.xml` (change set `NNN`) → `scripts/NNN-name.sql` → Oracle
+
+```
+backend/src/main/resources/db/changelog/
+├── db.changelog-master.xml                 # one change set per script: id 001…021, <sqlFile> + <rollback><sqlFile>
+└── scripts/                                # the actual Oracle SQL (CREATE TABLE, indexes, seed rows)
+    ├── 001-create-agent-account-table.sql
+    ├── 002-create-account-user-table.sql
+    ├── …
+    ├── 021-create-beneficiaries-table.sql
+    └── rollback/                           # one rollback script per change (DROP / DELETE)
+        └── 001-create-agent-account-table-rollback.sql …
+```
+
+Rules:
+- SQL lives only in `scripts/`; the changelog only declares each change set (`id` = the script number) and points at the script and its rollback script.
+- Change set IDs run `001`, `002`, … in dependency order (tables before the tables that reference them).
+- Liquibase alone runs the scripts (on application start, or `liquibase update` / `rollback`) and records them in `DATABASECHANGELOG` / `DATABASECHANGELOGLOCK`. Never run a script by hand.
+- To change the schema, add `scripts/022-….sql` (and its rollback script) and a change set with `id="022"` at the end of the changelog. Never edit a script or change set that has already run on a shared database: Liquibase checks checksums.
+
+## Logs
+
+The API writes to the console and to rolling files in `logs/` (next to where it starts; set `LOG_DIR` to change it):
+
+| File | Contents | Kept |
+|---|---|---|
+| `primepay-api.log` | everything at INFO and above | new file daily or at 20 MB, 30 days, 1 GB max, old files gzipped in `logs/archive/` |
+| `primepay-api-error.log` | warnings and errors only | 90 days |
+
+Each line carries the request ID (also returned to clients as `X-Request-Id`). `PRIMEPAY_LOG_LEVEL=DEBUG` makes the app's own logs more detailed. Tests log to the console only. Configuration: `backend/src/main/resources/logback-spring.xml`.
+
+Local setup used on the development PC (Oracle AI Database 26ai Free, pluggable database `FREEPDB1`):
+
+| Schema | Used by |
+|---|---|
+| `PRIMEPAY` | the application (`dev` and `prod` profiles) |
+| `PRIMEPAY_TEST` | the automated tests (rebuilt from the change sets on every test run) |
+
+Create them once as SYSDBA (replace the passwords):
+
+```sql
+ALTER SESSION SET CONTAINER = FREEPDB1;
+CREATE USER PRIMEPAY IDENTIFIED BY "<password>" DEFAULT TABLESPACE USERS QUOTA UNLIMITED ON USERS;
+GRANT CREATE SESSION, CREATE TABLE, CREATE SEQUENCE, CREATE VIEW, CREATE PROCEDURE, CREATE TRIGGER TO PRIMEPAY;
+CREATE USER PRIMEPAY_TEST IDENTIFIED BY "<password>" DEFAULT TABLESPACE USERS QUOTA UNLIMITED ON USERS;
+GRANT CREATE SESSION, CREATE TABLE, CREATE SEQUENCE, CREATE VIEW, CREATE PROCEDURE, CREATE TRIGGER TO PRIMEPAY_TEST;
+```
+
+## Configuration (`.env`)
+
+Secrets live in environment variables or in a git-ignored `.env` file in the project root (the API reads it automatically). Never commit it.
+
+| Variable | Purpose |
+|---|---|
+| `SPRING_DATASOURCE_URL` | e.g. `jdbc:oracle:thin:@//192.168.1.15:1521/FREEPDB1` |
+| `SPRING_DATASOURCE_USERNAME` / `SPRING_DATASOURCE_PASSWORD` | application schema (`PRIMEPAY`) |
+| `TEST_DATASOURCE_USERNAME` / `TEST_DATASOURCE_PASSWORD` | test schema (`PRIMEPAY_TEST`) |
+| `JWT_SECRET_BASE64` | token signing key (Base64 of at least 32 random bytes) |
+| `FIELD_ENCRYPTION_KEY_BASE64` | AES key for bank account numbers (Base64 of 32 random bytes) |
+| `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_FROM` | SMTP server for emailed sign-in codes (Gmail app password, Outlook, Zoho, SES SMTP …) |
+| `MSG91_AUTH_KEY`, `MSG91_TEMPLATE_ID` | MSG91 SMS for mobile sign-in codes; the DLT-approved template must contain `##otp##` |
+| `APP_DEV_BOOTSTRAP_PASSWORD`, `APP_DEV_SEED_PASSWORD` | `dev` profile only: fixed passwords for the demo accounts |
+
+Profiles: `dev` (default; demo accounts; when a channel has no provider the code is written to the API log) and `prod` (`SPRING_PROFILES_ACTIVE=prod`: no demo accounts, every secret and provider required, codes are never logged).
+
+## Sign-in
+
+1. **Email or mobile number + password.** The mobile can be typed as `98765 43210`, `+91 98765 43210` or `09876543210`.
+2. **One-time code** sent to that email (SMTP) or by SMS to that mobile (MSG91). The dashboard opens only after the code is verified.
+
+API: `POST /api/v1/auth/login` `{identifier, password}` → `{challengeId, channel, destination, …}` (no token) · `POST /api/v1/auth/login/verify` `{challengeId, otp}` → access token · `POST /api/v1/auth/login/resend` `{challengeId}`.
+
+Until SMTP/MSG91 credentials are added, the `dev` profile writes each code to the API log (`DEV ONLY - no EMAIL provider configured. sign-in code for …`). In `prod` sign-in fails clearly instead of skipping delivery.
+
+## Run locally
+
+Requirements: JDK 17, Node.js 20+, Oracle Database with the two schemas above, and `.env`.
 
 ```powershell
 cd backend
 .\mvnw.cmd spring-boot:run
 ```
-
-The log prints a **development-only** Platform Admin login once at startup:
-`DEV ONLY: Platform Admin login username='admin@primepay.local' password='…'`.
-A new password is generated on each start; set `DEV_ADMIN_PASSWORD` to keep one fixed.
-
-Web (proxies `/api` to `localhost:8080`):
 
 ```powershell
 cd frontend
@@ -46,45 +116,22 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 and sign in. Swagger UI: http://localhost:8080/swagger-ui/index.html.
-
-## Deploy a demo on Render (free)
-
-The root `Dockerfile` builds the web app into the Spring Boot jar, so one service serves the screens and the API at the same URL. `render.yaml` describes that service.
-
-1. Sign in at https://render.com with GitHub and allow access to this repository.
-2. **New → Blueprint**, choose this repository and the branch to deploy, and click **Apply**.
-3. When the deploy finishes, open the service URL (`https://primepay-….onrender.com`).
-4. Sign-in passwords are in the service's **Environment** tab: `APP_DEV_BOOTSTRAP_PASSWORD` for `admin@primepay.local`, `APP_DEV_SEED_PASSWORD` for the other demo accounts (`super@`, `master@`, `distributor@`, `retailer@` … `primepay.local`).
-
-This is a demo deployment: it runs the `dev` profile with an in-memory database (everything resets when the service restarts or wakes from sleep), simulated payment providers and on-screen OTPs. Use the `oracle` profile with real secrets and providers for anything beyond a demo.
-
-## Run with Oracle (Docker)
-
-```powershell
-Copy-Item .env.example .env   # then set ORACLE_SYS_PASSWORD, ORACLE_APP_PASSWORD, JWT_SECRET_BASE64
-docker compose up --build
-```
-
-- Oracle Free on `localhost:1521/FREEPDB1` (app schema `primepay`, created by the container)
-- API on http://localhost:8080 (profile `oracle`; Liquibase creates the tables)
-- Web on http://localhost:8081
-
-To run only Oracle and keep the API in your IDE: `docker compose up oracle`, then start the API with
-`SPRING_PROFILES_ACTIVE=oracle` and the `SPRING_DATASOURCE_*` and `JWT_SECRET_BASE64` variables set.
+Open http://localhost:5173 (the web app proxies `/api` to `localhost:8080`). Swagger UI: http://localhost:8080/swagger-ui/index.html.
 
 ## Tests
 
 ```powershell
-cd backend;  .\mvnw.cmd test
+cd backend;  .\mvnw.cmd clean test
 cd frontend; npm test; npm run typecheck; npm run lint
 ```
 
+Backend tests run against Oracle in the `PRIMEPAY_TEST` schema, which Liquibase drops and rebuilds for each test context; a test-only sender captures the sign-in codes.
+
 ## Development accounts
 
-Each start of the `dev` profile builds a fresh in-memory database with fictional data, created through the real services: a ₹10 lakh wallet load, transfers down the chain (Super → Master → Distributor → Retailer), three verified saved bank accounts, two successful withdrawals with commission, one declined withdrawal with its refund, and a credit card bill payment.
+The `dev` profile creates fictional demo accounts on first start (kept in Oracle across restarts), through the real services: a wallet load, add-funds top-ups, verified saved bank accounts, withdrawals and a credit card bill payment.
 
-| Login | Role |
+| Email | Role |
 |---|---|
 | `admin@primepay.local` | Platform Admin |
 | `admin2@primepay.local` | Platform Admin (second approver for maker-checker adjustments) |
@@ -93,9 +140,7 @@ Each start of the `dev` profile builds a fresh in-memory database with fictional
 | `distributor@primepay.local` | Distributor (PP-DT-3307) |
 | `retailer@primepay.local`, `retailer2@primepay.local` | Retailers (PP-RT-48210, PP-RT-48177) |
 
-Passwords are generated on every start and printed once in the API log, in a block headed `DEV ONLY: test logins`. To keep them fixed, set `DEV_ADMIN_PASSWORD` and `DEV_SEED_PASSWORD` before starting.
-
-Handy test values for the retailer flow are listed in the next section. In development, the forgot-password and onboarding OTP codes are shown on screen because there is no SMS provider.
+Passwords come from `APP_DEV_BOOTSTRAP_PASSWORD` (admin) and `APP_DEV_SEED_PASSWORD` (the others) in `.env`; if they are empty, passwords are generated and printed once in the API log. Each demo account also has a fictional mobile number (see its profile) for trying mobile sign-in.
 
 ## Who creates whom, and who does business
 
@@ -142,14 +187,15 @@ Dashboard (role-specific, live figures and charts) · Users and user detail · H
 - Secrets come from environment variables only. `.env` is git-ignored, and `.env.example` holds no values.
 - Passwords are hashed with BCrypt (strength 12). Tokens are HS256 JWTs signed with `JWT_SECRET_BASE64`.
 - The dev admin bootstrap runs only when `app.dev.bootstrap.enabled=true` (the `dev` profile, or local Docker). Never enable it in a shared environment.
-- Sign-in locks for 30 minutes after 5 wrong passwords; a password reset unlocks it. Unknown usernames and wrong passwords get the same answer.
+- Sign-in is two steps: email or mobile + password, then a one-time code sent to that email or mobile. Codes are BCrypt-hashed, expire in 5 minutes, allow 5 attempts and 3 resends (60 s apart), and work once; at most 5 sign-ins per account per 15 minutes reach the code step. Sign-in locks for 30 minutes after 5 wrong passwords; a password reset unlocks it. Unknown accounts and wrong passwords get the same answer.
 - Every money action needs an `Idempotency-Key`; repeating a request returns the original result instead of moving money twice.
 
 ## Open items
 
-- **Oracle via Docker is untested.** Docker isn't installed on the build machine. Liquibase changelog `005-platform-core.xml` uses generic types meant for Oracle and H2, but it has only been run on H2.
+- **OTP providers need credentials.** SMTP and MSG91 are integrated but have no credentials yet, so in `dev` sign-in codes go to the API log. Add the `MAIL_*` and `MSG91_*` values to `.env` to send real emails and SMS.
+- **Hosting needs an Oracle database.** The single-image `Dockerfile` and `render.yaml` expect `SPRING_DATASOURCE_*` for a reachable Oracle Database; free hosts like Render don't provide one.
 - **Identity tables:** users still live in `agent_account` / `account_user`, not yet in the `PP_USERS` / closure-table design in docs/database.md. Hierarchy scope is computed by walking the parent chain.
 - **Refresh tokens** (rotation, logout revoke) are not built; access tokens last 30 minutes.
 - **Exports:** CSV everywhere and a printable receipt; Excel and PDF files are not built yet.
-- **Providers:** OTP, SMS/email, KYC, bank verification, payouts, the bill-payment (BBPS) aggregator and the payment gateway use mock adapters; real providers need approved credentials.
+- **Providers:** KYC, bank verification, payouts, the bill-payment (BBPS) aggregator and the payment gateway use mock adapters; real providers need approved credentials. Sign-in OTP email (SMTP) and SMS (MSG91) are real integrations.
 - Reference platform research (docs/reference-research.md) has not been done.

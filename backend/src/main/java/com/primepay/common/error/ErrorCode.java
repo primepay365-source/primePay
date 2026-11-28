@@ -21,6 +21,7 @@ public enum ErrorCode {
     ACCOUNT_LOCKED(HttpStatus.LOCKED, "The account is temporarily locked."),
     PAYLOAD_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "The uploaded file is too large."),
     RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Too many requests. Try again shortly."),
+    OTP_DELIVERY_FAILED(HttpStatus.SERVICE_UNAVAILABLE, "The one-time code could not be sent. Try again in a moment."),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Something went wrong. No changes were made.");
 
     private final HttpStatus status;

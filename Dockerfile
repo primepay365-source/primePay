@@ -1,6 +1,6 @@
 # Single-image build for hosting (for example Render): the web app is built and bundled into the Spring Boot jar,
-# so the screens and the API share one URL. Uses the "dev" profile (in-memory H2, simulated providers) unless
-# SPRING_PROFILES_ACTIVE says otherwise. Demo only: data resets on every restart and no real money moves.
+# so the screens and the API share one URL. Needs an Oracle Database: set SPRING_DATASOURCE_URL, _USERNAME, _PASSWORD
+# and JWT_SECRET_BASE64 (plus MAIL_* / MSG91_* to send sign-in codes). Payment providers are simulated.
 
 # 1) Web app
 FROM node:22-alpine AS web

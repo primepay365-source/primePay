@@ -5,7 +5,7 @@ import { renderApp } from '../../test/renderApp'
 import { navItemsFor } from './navigation'
 
 vi.mock('../../services/authService', () => ({
-  authService: { login: vi.fn(), me: vi.fn() },
+  authService: { startLogin: vi.fn(), verifyLogin: vi.fn(), resendLoginCode: vi.fn(), me: vi.fn() },
 }))
 
 describe('route guards', () => {

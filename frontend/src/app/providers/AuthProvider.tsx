@@ -43,10 +43,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [status])
 
-  const login = useCallback(async (username: string, password: string, remember: boolean) => {
-    const result = await authService.login(username.trim(), password)
+  const startLogin = useCallback(async (identifier: string, password: string, remember: boolean) => {
+    const challenge = await authService.startLogin(identifier.trim(), password)
+    sessionStore.setRememberedUsername(remember ? identifier.trim() : null)
+    return challenge
+  }, [])
+
+  const resendLoginCode = useCallback((challengeId: string) => authService.resendLoginCode(challengeId), [])
+
+  const completeLogin = useCallback(async (challengeId: string, otp: string) => {
+    const result = await authService.verifyLogin(challengeId, otp)
     sessionStore.write({ accessToken: result.accessToken, expiresAt: result.expiresAt })
-    sessionStore.setRememberedUsername(remember ? username.trim() : null)
     try {
       const me = await authService.me()
       setUser(me)
@@ -60,8 +67,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo<AuthContextValue>(
-    () => ({ status, user, signOutReason, login, logout }),
-    [status, user, signOutReason, login, logout],
+    () => ({ status, user, signOutReason, startLogin, completeLogin, resendLoginCode, logout }),
+    [status, user, signOutReason, startLogin, completeLogin, resendLoginCode, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

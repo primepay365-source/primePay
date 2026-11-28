@@ -42,21 +42,27 @@ public class AccountService {
 
     @Transactional
     public AccountResponse createAccount(AgentAccount actor, CreateAccountRequest request) {
-        AgentAccount parent = accounts.findById(request.parentId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Parent account not found"));
-
-        if (actor.getRole() != AccountRole.ADMIN && !hierarchyIds(actor.getId()).contains(parent.getId())) {
-            throw new BusinessException(ErrorCode.OUTSIDE_HIERARCHY, "The parent account is outside your network.");
-        }
         if (!canCreate(actor.getRole(), request.role())) {
             throw new BusinessException(ErrorCode.ACCESS_DENIED, "Your role can't create a " + label(request.role()) + ".");
         }
-        if (!request.role().allowedParentRoles().contains(parent.getRole())) {
-            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "A " + label(request.role()) + " must belong to a "
-                    + request.role().allowedParentRoles().stream().sorted(java.util.Comparator.reverseOrder()).map(AccountService::label).collect(Collectors.joining(" or ")) + ".");
-        }
-        if (!parent.isActive()) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "The parent account is not active");
+        // A Platform Admin sits at the top of the hierarchy: no parent. Every other level needs one.
+        AgentAccount parent = null;
+        if (request.role() != AccountRole.ADMIN) {
+            if (request.parentId() == null) {
+                throw new BusinessException(ErrorCode.VALIDATION_FAILED, "Choose the parent account.");
+            }
+            parent = accounts.findById(request.parentId())
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Parent account not found"));
+            if (actor.getRole() != AccountRole.ADMIN && !hierarchyIds(actor.getId()).contains(parent.getId())) {
+                throw new BusinessException(ErrorCode.OUTSIDE_HIERARCHY, "The parent account is outside your network.");
+            }
+            if (!request.role().allowedParentRoles().contains(parent.getRole())) {
+                throw new BusinessException(ErrorCode.VALIDATION_FAILED, "A " + label(request.role()) + " must belong to a "
+                        + request.role().allowedParentRoles().stream().sorted(java.util.Comparator.reverseOrder()).map(AccountService::label).collect(Collectors.joining(" or ")) + ".");
+            }
+            if (!parent.isActive()) {
+                throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "The parent account is not active");
+            }
         }
         if (accounts.existsByAccountCode(request.accountCode())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Account code already exists");
@@ -135,11 +141,8 @@ public class AccountService {
         };
     }
     private boolean canCreate(AccountRole actorRole, AccountRole targetRole) {
-        if (targetRole == AccountRole.ADMIN) {
-            return false;
-        }
         return switch (actorRole) {
-            case ADMIN -> true; // Super, Master, Distributor or Retailer, each under a parent of the level above
+            case ADMIN -> true; // another Platform Admin, or Super, Master, Distributor, Retailer under a parent of the level above
             case SUPER_DISTRIBUTOR -> targetRole == AccountRole.MASTER_DISTRIBUTOR
                     || targetRole == AccountRole.DISTRIBUTOR
                     || targetRole == AccountRole.RETAILER;

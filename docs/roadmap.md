@@ -8,13 +8,13 @@
 | 2 | Oracle schema and hierarchy | `PP_` tables (identity, hierarchy closure, roles/permissions), data migration from the Phase 1 tables, hierarchy APIs, seed hierarchy for all 5 roles | Partly: platform tables (wallet, ledger, transactions, commission, limits, audit, notifications), hierarchy tree API and seed data done; users not yet moved to PP_USERS / closure table |
 | 3 | Authentication and security | Refresh-token rotation, logout, lockout, forgot/reset password with OTP, change password, permission authorities, rate limiting, login history, audit service | Partly: lockout, OTP reset, change password, login audit done; refresh tokens and rate limiting not built |
 | 4 | Users and onboarding | `/users` CRUD with status lifecycle, CSV/Excel export, 5-step onboarding draft API, mock KYC/bank/OTP adapters, approvals queue, screens | Done (CSV export; onboarding is submitted in one request at the end, draft kept in the browser) |
-| 5 | Dashboards | `/reports/dashboard` per role from Oracle data, five dashboards | Done (H2 dev; Oracle untested) |
-| 6 | Wallet and ledger | Wallets, ledger, load, transfer with locking and idempotency, statement, balance history | Done (H2 dev; Oracle untested) |
-| 7 | Transactions | Transaction service and state machine, payout through a mock provider, receipts, reversal, adjustments (maker-checker) | Done (H2 dev; Oracle untested) |
-| 8 | Commission engine | Rules, slabs, distribution, statements, reversal of commission | Done (H2 dev; Oracle untested) |
-| 9 | Velocity | Limit configuration and concurrency-safe enforcement with IST day boundaries | Done (H2 dev; Oracle untested) |
+| 5 | Dashboards | `/reports/dashboard` per role from Oracle data, five dashboards | Done (on Oracle) |
+| 6 | Wallet and ledger | Wallets, ledger, load, transfer with locking and idempotency, statement, balance history | Done (on Oracle) |
+| 7 | Transactions | Transaction service and state machine, payout through a mock provider, receipts, reversal, adjustments (maker-checker) | Done (on Oracle) |
+| 8 | Commission engine | Rules, slabs, distribution, statements, reversal of commission | Done (on Oracle) |
+| 9 | Velocity | Limit configuration and concurrency-safe enforcement with IST day boundaries | Done (on Oracle) |
 | 10 | Reports | 13 reports with filters, paging, CSV/Excel/PDF, reconciliation | Done (CSV only) |
-| 11 | Testing | All 18 mandatory scenarios as integration tests on Oracle, frontend tests | Partly: 18 scenarios on H2, Oracle pending |
+| 11 | Testing | All 18 mandatory scenarios as integration tests on Oracle, frontend tests | Done: 47 backend tests on Oracle (PRIMEPAY_TEST), 11 frontend tests |
 | 12 | Docker and deployment | Production images, HTTPS reverse proxy, secrets, CI | Planned |
 
 Each phase ends with: what was built, files changed, database changes, API endpoints, test instructions, test results, and your confirmation before the next phase starts.

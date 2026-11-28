@@ -1,5 +1,7 @@
 package com.primepay;
 
+import com.primepay.support.CapturingOtpSender;
+import com.primepay.support.TestLogin;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -25,7 +27,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 
 /**
  * The 18 mandatory business scenarios from the requirements, end to end through the HTTP API
- * (security, validation, services, ledger and database). Runs on the H2 dev database in Oracle mode.
+ * (security, validation, services, ledger and database). Runs on Oracle Database (the PRIMEPAY_TEST schema).
  */
 @SpringBootTest(properties = {
         "app.dev.bootstrap.username=admin@primepay.local",
@@ -33,7 +35,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
         "app.dev.seed.password=Scenario-Seed-Pass-1",
         "app.dev.seed.sample-data=false"
 })
-@ActiveProfiles("dev")
+@ActiveProfiles({"dev", "test"})
 @AutoConfigureMockMvc
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -42,6 +44,7 @@ class MandatoryScenariosTest {
 
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
+    @Autowired CapturingOtpSender otps;
 
     String admin, admin2, sd, md, dt, dt2, rt, rt2;
     long adminId, sdId, mdId, dtId, dt2Id, rtId, rt2Id;
@@ -210,7 +213,7 @@ class MandatoryScenariosTest {
                 .at("/error/code").asText()).isEqualTo("ACCOUNT_INACTIVE");
         // And it can't sign in.
         MvcResult login = mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"t.retail2\",\"password\":\"" + PW + "\"}")).andReturn();
+                .content("{\"identifier\":\"t.retail2@example.com\",\"password\":\"" + PW + "\"}")).andReturn();
         assertThat(login.getResponse().getStatus()).isEqualTo(422);
     }
 
@@ -250,13 +253,15 @@ class MandatoryScenariosTest {
         assertThat(loginStatus("t.master", "wrong")).isEqualTo(423);
         assertThat(loginStatus("t.master", PW)).isEqualTo(423);
         JsonNode forgot = json.readTree(mvc.perform(post("/api/v1/auth/forgot-password").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"t.master\"}")).andReturn().getResponse().getContentAsString());
-        String otp = forgot.at("/data/devOtp").asText();
+                .content("{\"identifier\":\"t.master@example.com\"}")).andReturn().getResponse().getContentAsString());
+        assertThat(forgot.at("/data/devOtp").isNull()).isTrue(); // the code never comes back in the response
+        String otp = otps.codeFor("t.master@example.com");     // it arrives by email
         assertThat(otp).hasSize(6);
         int reset = mvc.perform(post("/api/v1/auth/reset-password").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"t.master\",\"otp\":\"" + otp + "\",\"newPassword\":\"New-Secure-Pass-9\"}")).andReturn().getResponse().getStatus();
+                .content("{\"identifier\":\"t.master@example.com\",\"otp\":\"" + otp + "\",\"newPassword\":\"New-Secure-Pass-9\"}")).andReturn().getResponse().getStatus();
         assertThat(reset).isEqualTo(200);
         assertThat(loginStatus("t.master", "New-Secure-Pass-9")).isEqualTo(200);
+        assertThat(login("t.master", "New-Secure-Pass-9")).isNotBlank(); // and the code step completes
     }
 
     // ---------------------------------------------------------------- helpers
@@ -303,7 +308,7 @@ class MandatoryScenariosTest {
     private static String userBody(String code, String role, long parentId, String username) {
         return """
                 {"accountCode":"%s","displayName":"Test %s","role":"%s","parentId":%d,"username":"%s","initialPassword":"%s",
-                 "email":"%s@example.com","mobile":"+919800000000","businessName":"Biz %s"}""".formatted(code, code, role, parentId, username, PW, username, code);
+                 "email":"%s@example.com","businessName":"Biz %s"}""".formatted(code, code, role, parentId, username, PW, username, code);
     }
 
     private JsonNode call(MockHttpServletRequestBuilder request, String token, int expectedStatus) throws Exception {
@@ -314,15 +319,11 @@ class MandatoryScenariosTest {
     }
 
     private String login(String username, String password) throws Exception {
-        MvcResult r = mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}")).andReturn();
-        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(200);
-        return json.readTree(r.getResponse().getContentAsString()).get("accessToken").asText();
+        return TestLogin.login(mvc, json, otps, username, password);
     }
 
     private int loginStatus(String username, String password) throws Exception {
-        return mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}")).andReturn().getResponse().getStatus();
+        return TestLogin.passwordStepStatus(mvc, json, username, password);
     }
 
     private static String key() {

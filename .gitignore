@@ -40,3 +40,7 @@ frontend/tsconfig.tsbuildinfo
 
 # Web app copied into the API only by the hosting Docker build
 backend/src/main/resources/static/
+
+# Application log files
+logs/
+backend/logs/

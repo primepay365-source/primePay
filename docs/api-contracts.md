@@ -8,12 +8,14 @@ Status: ✅ available now · 🔁 exists, being reshaped · ⏳ planned (phase n
 
 | Method | Path | Auth | Status | Notes |
 |---|---|---|---|---|
-| POST | `/auth/login` | public | ✅ | `{username, password}` → access token, expiry, account |
+| POST | `/auth/login` | public | ✅ | `{identifier (email or mobile), password}` → `{challengeId, channel, destination, codeLength, resendAfterSeconds}`; a code is sent, no token yet |
+| POST | `/auth/login/verify` | public | ✅ | `{challengeId, otp}` → access token, expiry, account |
+| POST | `/auth/login/resend` | public | ✅ | `{challengeId}` → new code (60 s apart, 3 at most) |
 | GET | `/auth/me` | any | ✅ (Phase 1) | Current user, role and permissions |
 | POST | `/auth/refresh` | refresh token | ⏳ 3 | Rotates the refresh token; reuse revokes the whole token family |
 | POST | `/auth/logout` | any | ⏳ 3 | Revokes the refresh token family |
 | POST | `/auth/forgot-password` | public | ⏳ 3 | Always returns 202, whether or not the user exists |
-| POST | `/auth/reset-password` | public | ⏳ 3 | `{username, otp, newPassword}` |
+| POST | `/auth/reset-password` | public | ✅ | `{identifier, otp, newPassword}` |
 | POST | `/auth/change-password` | any | ⏳ 3 | |
 
 ## Users and hierarchy

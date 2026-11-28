@@ -3,12 +3,12 @@
 Spring Boot 3 / Java 17 modular monolith. Build with the Maven Wrapper (`mvnw` / `mvnw.cmd`), so no local Maven install is needed.
 
 ```powershell
-.\mvnw.cmd spring-boot:run        # dev profile: H2 in Oracle mode, generated admin password in the log
-.\mvnw.cmd test                   # unit + MockMvc tests
+.\mvnw.cmd spring-boot:run        # dev profile on Oracle (settings from ../.env); Liquibase migrates the schema
+.\mvnw.cmd clean test             # MockMvc tests on Oracle (PRIMEPAY_TEST schema, rebuilt per run)
 .\mvnw.cmd -DskipTests package    # target/primepay-api-0.1.0-SNAPSHOT.jar
 ```
 
-Profiles: `dev` (default), `oracle` (needs `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `JWT_SECRET_BASE64`).
+Oracle Database only. Profiles: `dev` (default; demo accounts; sign-in codes go to the log when no email/SMS provider is set) and `prod` (all secrets and providers required). Both need `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` and `JWT_SECRET_BASE64`; see the root README.
 
 Package layout (`com.primepay`): `config`, `security`, `common` (API envelope, errors, request ID, auditing base), `auth`, `user`, `distributor`. The remaining modules are added in their phases; see [../docs/architecture.md](../docs/architecture.md).
 

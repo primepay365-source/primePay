@@ -126,7 +126,7 @@ export function ChangePasswordPage() {
 /** Public 4-step reset: account → code → new password → done. */
 export function ForgotPasswordPage() {
   const [step, setStep] = useState(0)
-  const [username, setUsername] = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [code, setCode] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -138,7 +138,7 @@ export function ForgotPasswordPage() {
     setBusy(true)
     setError(null)
     try {
-      const { data } = await apiClient.post<ApiEnvelope<{ message: string; devOtp: string | null; maskedDestination: string | null }>>('/auth/forgot-password', { username })
+      const { data } = await apiClient.post<ApiEnvelope<{ message: string; devOtp: string | null; maskedDestination: string | null }>>('/auth/forgot-password', { identifier })
       setInfo(data.data ?? null)
       setStep(1)
     } catch (e) {
@@ -152,7 +152,7 @@ export function ForgotPasswordPage() {
     setBusy(true)
     setError(null)
     try {
-      await apiClient.post('/auth/reset-password', { username, otp: code, newPassword: password })
+      await apiClient.post('/auth/reset-password', { identifier, otp: code, newPassword: password })
       setStep(3)
     } catch (e) {
       setError(errorMessage(e))
@@ -168,16 +168,15 @@ export function ForgotPasswordPage() {
         <LinearProgress variant="determinate" value={((step + 1) / 4) * 100} aria-label={`Step ${step + 1} of 4`} sx={{ height: 6, borderRadius: 3 }} />
         {step === 0 && (
           <>
-            <Box><Typography variant="h1" sx={{ fontSize: 26 }}>Forgot your password?</Typography><Typography color="text.secondary" sx={{ mt: 0.75 }}>Enter your username. We'll send a 6-digit code to the mobile and email on your account.</Typography></Box>
-            <TextField label="Username or email" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
+            <Box><Typography variant="h1" sx={{ fontSize: 26 }}>Forgot your password?</Typography><Typography color="text.secondary" sx={{ mt: 0.75 }}>Enter the email address or mobile number on your account. We'll send a code to it.</Typography></Box>
+            <TextField label="Email or mobile number" autoComplete="username" value={identifier} onChange={(e) => setIdentifier(e.target.value)} autoFocus />
             {error && <Alert severity="error">{error}</Alert>}
-            <Button variant="contained" size="large" onClick={sendCode} disabled={busy || !username.trim()}>Send code</Button>
+            <Button variant="contained" size="large" onClick={sendCode} disabled={busy || !identifier.trim()}>Send code</Button>
           </>
         )}
         {step === 1 && (
           <>
             <Box><Typography variant="h1" sx={{ fontSize: 26 }}>Enter the code</Typography><Typography color="text.secondary" sx={{ mt: 0.75 }}>{info?.maskedDestination ? `Sent to ${info.maskedDestination}. ` : ''}{info?.message}</Typography></Box>
-            {info?.devOtp && <Alert severity="info">Development mock SMS: your code is <b>{info.devOtp}</b></Alert>}
             <TextField label="6-digit code" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} slotProps={{ htmlInput: { inputMode: 'numeric', autoComplete: 'one-time-code' } }} />
             {error && <Alert severity="error">{error}</Alert>}
             <Box sx={{ display: 'flex', gap: 1 }}><Button variant="outlined" color="inherit" onClick={() => setStep(0)}>Back</Button><Button variant="contained" sx={{ flex: 1 }} disabled={code.length !== 6} onClick={() => setStep(2)}>Continue</Button></Box>

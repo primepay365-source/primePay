@@ -1,5 +1,7 @@
 package com.primepay.user;
 
+import com.primepay.common.ContactNormalizer;
+
 import com.primepay.audit.AuditService;
 import com.primepay.common.error.BusinessException;
 import com.primepay.common.error.ErrorCode;
@@ -15,6 +17,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,10 +36,12 @@ public class UserService {
     private final PasswordEncoder passwordEncoder;
     private final AuditService audit;
     private final NotificationService notifications;
+    private final ApplicationEventPublisher events;
 
     public UserService(AgentAccountRepository accounts, AccountUserRepository users, UserStatusHistoryRepository statusHistory,
                        HierarchyService hierarchy, WalletService wallets, AccountService accountService,
-                       PasswordEncoder passwordEncoder, AuditService audit, NotificationService notifications) {
+                       PasswordEncoder passwordEncoder, AuditService audit, NotificationService notifications,
+                       ApplicationEventPublisher events) {
         this.accounts = accounts;
         this.users = users;
         this.statusHistory = statusHistory;
@@ -46,6 +51,7 @@ public class UserService {
         this.passwordEncoder = passwordEncoder;
         this.audit = audit;
         this.notifications = notifications;
+        this.events = events;
     }
 
     public record UserRow(Long id, String accountCode, String username, String displayName, String businessName, AccountRole role,
@@ -94,19 +100,32 @@ public class UserService {
                 .toList();
     }
 
+    /** Creates the user and emails them their sign-in details (role, username, password) once the account is saved. */
     @Transactional
     public UserRow create(AgentAccount actor, CreateAccountRequest request, String email, String mobile, String businessName, String address) {
+        return create(actor, request, email, mobile, businessName, address, true);
+    }
+
+    @Transactional
+    public UserRow create(AgentAccount actor, CreateAccountRequest request, String email, String mobile, String businessName, String address,
+                          boolean sendWelcomeEmail) {
         AccountResponse created = accountService.createAccount(actor, request);
         AgentAccount account = accounts.findById(created.id()).orElseThrow();
-        account.setEmail(blankToNull(email));
-        account.setMobile(blankToNull(mobile));
+        assignContacts(account, email, mobile);
         account.setBusinessName(blankToNull(businessName));
         account.setAddress(blankToNull(address));
-        wallets.getOrCreate(account);
+        if (account.getRole().canTransact()) {
+            wallets.getOrCreate(account); // Platform Admins have no wallet
+        }
         statusHistory.save(new UserStatusHistory(account.getId(), null, AccountStatus.ACTIVE, "Created by " + actor.getAccountCode(), actor.getId()));
         audit.record(actor, "USER_CREATE", "USER", account.getAccountCode(), "role=" + account.getRole() + " parent=" + request.parentId());
         notifications.notify(account.getId(), NotificationService.ACCOUNT, "Welcome to PrimePay",
                 "Your " + account.getRole().name().replace('_', ' ').toLowerCase(Locale.ROOT) + " account " + account.getAccountCode() + " is active.", "/profile");
+        if (sendWelcomeEmail && account.getEmail() != null) {
+            // Delivered after the transaction commits (WelcomeMailService), so a mail problem never undoes the creation.
+            events.publishEvent(new UserCreatedEvent(account.getId(), account.getAccountCode(), account.getDisplayName(), account.getRole(),
+                    account.getEmail(), account.getMobile(), request.username().trim().toLowerCase(Locale.ROOT), request.initialPassword()));
+        }
         return toRows(List.of(account)).get(0);
     }
 
@@ -149,10 +168,31 @@ public class UserService {
         AgentAccount me = accounts.findById(actor.getId()).orElseThrow();
         if (displayName != null && !displayName.isBlank()) me.setDisplayName(displayName.trim());
         me.setBusinessName(blankToNull(businessName));
-        me.setEmail(blankToNull(email));
+        assignContacts(me, email, me.getMobile());
         me.setAddress(blankToNull(address));
         audit.record(me, "PROFILE_UPDATE", "USER", me.getAccountCode(), null);
         return toRows(List.of(me)).get(0);
+    }
+
+    /**
+     * Email and mobile are sign-in identifiers: stored normalised (lower-case email, +91XXXXXXXXXX), at least one is
+     * required, and each may belong to one account only.
+     */
+    public void assignContacts(AgentAccount account, String rawEmail, String rawMobile) {
+        String email = ContactNormalizer.emailOrNull(rawEmail);
+        String mobile = ContactNormalizer.mobileOrNull(rawMobile);
+        if (email == null && mobile == null) {
+            throw new BusinessException(ErrorCode.VALIDATION_FAILED, "Enter an email address or a mobile number; one of them is used to sign in.");
+        }
+        Long id = account.getId() == null ? -1L : account.getId();
+        if (email != null && accounts.existsByEmailAndIdNot(email, id)) {
+            throw new BusinessException(ErrorCode.DUPLICATE, "This email address is already used by another account.");
+        }
+        if (mobile != null && accounts.existsByMobileAndIdNot(mobile, id)) {
+            throw new BusinessException(ErrorCode.DUPLICATE, "This mobile number is already used by another account.");
+        }
+        account.setEmail(email);
+        account.setMobile(mobile);
     }
 
     /** Used by dev seeding and onboarding to keep status history complete. */

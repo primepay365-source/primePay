@@ -52,7 +52,7 @@ export function toApiError(error: AxiosError<ApiEnvelope<unknown>>): ApiError {
     return new ApiError(0, 'NETWORK_ERROR', "Can't reach PrimePay. Check your connection and try again.")
   }
   const { status, data } = error.response
-  const isLogin = error.config?.url?.endsWith('/auth/login') ?? false
+  const isLogin = /\/auth\/login(\/verify|\/resend)?$/.test(error.config?.url ?? '')
   if (status === 401 && !isLogin) onUnauthorized?.()
   const body = data?.error
   return new ApiError(

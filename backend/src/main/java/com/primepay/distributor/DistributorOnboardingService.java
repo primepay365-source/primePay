@@ -89,8 +89,7 @@ public class DistributorOnboardingService {
                 actor));
         // Applications wait for a Platform Admin: no sign-in and no money movement until approved.
         distributor.changeStatus(AccountStatus.PENDING_APPROVAL);
-        distributor.setEmail(request.email().trim());
-        distributor.setMobile(request.mobile().trim());
+        userService.assignContacts(distributor, request.email(), request.mobile());
         distributor.setAddress(request.address().trim());
         distributor.setBusinessName(request.fullName().trim());
         userService.recordStatus(distributor.getId(), null, AccountStatus.PENDING_APPROVAL, "Onboarding submitted by " + actor.getAccountCode(), actor.getId());

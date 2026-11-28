@@ -114,6 +114,9 @@ public class DevAdminBootstrap implements ApplicationRunner {
         AgentAccount admin = accounts.findByAccountCode(code)
                 .orElseGet(() -> accounts.save(new AgentAccount(code, name, AccountRole.ADMIN, null)));
         AccountUser user = users.findByUsername(login).orElse(null);
+        if (admin.getEmail() == null && login.contains("@")) {
+            userService.assignContacts(admin, login, demoMobile(code));
+        }
         if (user == null) {
             users.save(new AccountUser(login, passwordEncoder.encode(password), admin));
         } else {
@@ -126,8 +129,8 @@ public class DevAdminBootstrap implements ApplicationRunner {
     private AgentAccount create(AgentAccount parent, String code, String name, AccountRole role, String login, String business, List<String> printed) {
         String password = blank(seedPassword) ? generatePassword() : seedPassword;
         var row = userService.create(parent, new CreateAccountRequest(code, name, role, parent.getId(), login, password),
-                login, "+9198765" + code.replaceAll("[^0-9]", "").substring(0, Math.min(5, code.replaceAll("[^0-9]", "").length())),
-                business, "Sample address, India");
+                login, demoMobile(code),
+                business, "Sample address, India", false); // fictional addresses: no welcome email
         printed.add(String.format("%-20s username='%s' password='%s'", role.name(), login, blank(seedPassword) ? password : "(from environment)"));
         return accounts.findById(row.id()).orElseThrow();
     }
@@ -160,6 +163,11 @@ public class DevAdminBootstrap implements ApplicationRunner {
         String ref = addFunds.start(account, "EDU", "VISA", account.getDisplayName(), amount).sessionRef();
         addFunds.choosePaymentMode(account, ref, "UPI", null, "seed.topup@okbank");
         addFunds.complete(account, ref, null, "seed.topup@okbank");
+    }
+
+    /** A valid, unique, fictional Indian mobile per demo account (+919XXXXXXXXX), stable across restarts. */
+    private static String demoMobile(String code) {
+        return "+919" + String.format("%09d", Math.floorMod(code.hashCode(), 1_000_000_000));
     }
 
     private static String key() {

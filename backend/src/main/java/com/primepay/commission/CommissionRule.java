@@ -47,7 +47,7 @@ public class CommissionRule {
     @Column(name = "slab_to", precision = 19, scale = 2)
     private BigDecimal slabTo;
 
-    /** Date-only; stored as TIMESTAMP so Oracle and H2 report the same column type. */
+    /** Date-only; stored as an Oracle TIMESTAMP column. */
     @JdbcTypeCode(SqlTypes.TIMESTAMP)
     @Column(name = "effective_from", nullable = false)
     private LocalDate effectiveFrom;

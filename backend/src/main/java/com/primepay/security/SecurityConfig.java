@@ -31,6 +31,8 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 public class SecurityConfig {
     private static final String[] PUBLIC_ENDPOINTS = {
             "/api/v1/auth/login",
+            "/api/v1/auth/login/verify",
+            "/api/v1/auth/login/resend",
             "/api/v1/auth/forgot-password",
             "/api/v1/auth/reset-password",
             "/actuator/health",

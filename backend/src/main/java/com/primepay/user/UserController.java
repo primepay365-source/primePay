@@ -82,7 +82,7 @@ public class UserController {
             @NotBlank @Size(max = 40) @Pattern(regexp = "[A-Za-z0-9_-]+") String accountCode,
             @NotBlank @Size(max = 160) String displayName,
             @NotNull AccountRole role,
-            @NotNull Long parentId,
+            Long parentId, // not used for a Platform Admin
             @NotBlank @Size(min = 3, max = 80) @Pattern(regexp = "[A-Za-z0-9._-]+") String username,
             @NotBlank @Size(min = 12, max = 200) String initialPassword,
             @Email @Size(max = 160) String email,

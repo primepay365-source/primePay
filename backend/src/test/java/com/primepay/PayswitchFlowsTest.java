@@ -1,5 +1,8 @@
 package com.primepay;
 
+import com.primepay.support.CapturingMailSender;
+import com.primepay.support.CapturingOtpSender;
+import com.primepay.support.TestLogin;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -32,12 +35,14 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
         "app.dev.seed.password=Flow-Seed-Pass-1",
         "app.dev.seed.sample-data=true"
 })
-@ActiveProfiles("dev")
+@ActiveProfiles({"dev", "test"})
 @AutoConfigureMockMvc
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class PayswitchFlowsTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
+    @Autowired CapturingOtpSender otps;
+    @Autowired CapturingMailSender mails;
 
     String rt, dt, admin;
 
@@ -260,6 +265,33 @@ class PayswitchFlowsTest {
     }
 
     @Test
+    void adminCreatesPlatformAdminWithPasswordFromTheForm() throws Exception {
+        String sd = login("super@primepay.local", "Flow-Seed-Pass-1");
+        String body = """
+                {"accountCode":"H-AD-1","displayName":"Test Admin","role":"ADMIN","username":"h.ad.1","initialPassword":"Admin-Form-Pass-123",
+                 "email":"h.ad.1@example.com","mobile":"+919812345670"}""";
+        JsonNode created = call(post("/api/v1/users").contentType(MediaType.APPLICATION_JSON).content(body), admin, 201).at("/data");
+        assertThat(created.at("/role").asText()).isEqualTo("ADMIN");
+        assertThat(created.at("/parentId").isNull() || created.at("/parentId").isMissingNode()).isTrue();
+
+        // The new user is emailed their role, username and password.
+        var mail = mails.awaitLastTo("h.ad.1@example.com");
+        assertThat(mail.getSubject()).isEqualTo("Your PrimePay Platform Admin account is ready");
+        assertThat(mail.getText()).contains("Role:      Platform Admin", "User ID:   H-AD-1", "Username:  h.ad.1",
+                "Password:  Admin-Form-Pass-123", "+919812345670");
+
+        // Signs in (password + code) with the password set at creation; it is stored only as a hash.
+        String newAdmin = login("h.ad.1@example.com", "Admin-Form-Pass-123");
+        assertThat(call(get("/api/v1/auth/me"), newAdmin, 200).at("/data/role").asText()).isEqualTo("ADMIN");
+
+        // Only a Platform Admin may create one; a parent is still required for every other level.
+        call(post("/api/v1/users").contentType(MediaType.APPLICATION_JSON).content(body.replace("H-AD-1", "H-AD-2").replace("h.ad.1", "h.ad.2").replace("5670", "5671")), sd, 403);
+        call(post("/api/v1/users").contentType(MediaType.APPLICATION_JSON).content("""
+                {"accountCode":"H-SD-NP","displayName":"No Parent","role":"SUPER_DISTRIBUTOR","username":"h.sd.np","initialPassword":"Admin-Form-Pass-123",
+                 "email":"h.sd.np@example.com"}"""), admin, 400);
+    }
+
+    @Test
     void everyLevelExceptAdminCanDoBusiness() throws Exception {
         String sd = login("super@primepay.local", "Flow-Seed-Pass-1");
         String md = login("master@primepay.local", "Flow-Seed-Pass-1");
@@ -299,7 +331,7 @@ class PayswitchFlowsTest {
         String username = code.toLowerCase().replace("-", ".");
         return call(post("/api/v1/users").contentType(MediaType.APPLICATION_JSON).content("""
                 {"accountCode":"%s","displayName":"Test %s","role":"%s","parentId":%d,"username":"%s","initialPassword":"Hier-User-Pass-123",
-                 "email":"%s@example.com","mobile":"+919800000000","businessName":"Biz %s"}""".formatted(code, code, role, parentId, username, username, code)),
+                 "email":"%s@example.com","businessName":"Biz %s"}""".formatted(code, code, role, parentId, username, username, code)),
                 token, expected);
     }
     // ------------------------------------------------------------------ helpers
@@ -350,9 +382,6 @@ class PayswitchFlowsTest {
     }
 
     private String login(String username, String password) throws Exception {
-        MvcResult r = mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}")).andReturn();
-        assertThat(r.getResponse().getStatus()).as(r.getResponse().getContentAsString()).isEqualTo(200);
-        return json.readTree(r.getResponse().getContentAsString()).get("accessToken").asText();
+        return TestLogin.login(mvc, json, otps, username, password);
     }
 }

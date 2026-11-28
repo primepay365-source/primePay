@@ -21,7 +21,7 @@ import { ROLE_LABELS } from '../../utils/roles'
 
 /** Which roles each role may create, and the parent role each child needs (matches the API rules). */
 export const CREATABLE: Record<Role, Role[]> = {
-  ADMIN: ['SUPER_DISTRIBUTOR', 'MASTER_DISTRIBUTOR', 'DISTRIBUTOR', 'RETAILER'],
+  ADMIN: ['ADMIN', 'SUPER_DISTRIBUTOR', 'MASTER_DISTRIBUTOR', 'DISTRIBUTOR', 'RETAILER'],
   SUPER_DISTRIBUTOR: ['MASTER_DISTRIBUTOR', 'DISTRIBUTOR', 'RETAILER'],
   MASTER_DISTRIBUTOR: ['DISTRIBUTOR', 'RETAILER'],
   DISTRIBUTOR: ['RETAILER'],
@@ -176,12 +176,6 @@ function StatusDialog({ target, onClose, onDone }: { target: UserRow; onClose: (
   )
 }
 
-function randomPassword() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
-  const bytes = crypto.getRandomValues(new Uint32Array(14))
-  return Array.from(bytes, (b) => chars[b % chars.length]).join('') + '#7'
-}
-
 const CODE_PREFIX: Record<Role, string> = { ADMIN: 'PP-AD-', SUPER_DISTRIBUTOR: 'PP-SD-', MASTER_DISTRIBUTOR: 'PP-MD-', DISTRIBUTOR: 'PP-DT-', RETAILER: 'PP-RT-' }
 
 function suggestCode(role: Role) {
@@ -191,15 +185,16 @@ function suggestCode(role: Role) {
 function AddUserDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const { user } = useAuth()
   const roles = user ? CREATABLE[user.role] : []
-  const [role, setRole] = useState<Role>(roles[0])
-  const [form, setForm] = useState({ accountCode: suggestCode(roles[0] ?? 'RETAILER'), displayName: '', businessName: '', email: '', mobile: '', username: '', initialPassword: randomPassword() })
+  const firstRole = roles.find((r) => r !== 'ADMIN') ?? roles[0]
+  const [role, setRole] = useState<Role>(firstRole)
+  const [form, setForm] = useState({ accountCode: suggestCode(firstRole ?? 'RETAILER'), displayName: '', businessName: '', email: '', mobile: '', username: '', initialPassword: '', confirmPassword: '' })
+  const isAdmin = role === 'ADMIN' // a Platform Admin has no parent
   const [showPassword, setShowPassword] = useState(false)
   const [parentId, setParentId] = useState<number | ''>('')
   const [touched, setTouched] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
-  const [copied, setCopied] = useState(false)
   const [created, setCreated] = useState<UserRow | null>(null)
   const candidates = useApiData(() => api.get<UserRow[]>('/users', { status: 'ACTIVE' }), [])
   const rates = useApiData(() => api.get<CommissionRate[]>('/commissions/rates', { role }), [role])
@@ -228,7 +223,8 @@ function AddUserDialog({ onClose, onCreated }: { onClose: () => void; onCreated:
   if (!/^\+?[0-9]{10,13}$/.test(form.mobile)) problems.mobile = 'Enter a 10-digit mobile, e.g. +919876543210'
   if (!/^[A-Za-z0-9._@-]{3,80}$/.test(form.username)) problems.username = 'Required: letters, numbers, . - _'
   if (form.initialPassword.length < 12) problems.initialPassword = 'At least 12 characters'
-  if (!parentId) problems.parentId = 'Choose the parent account'
+  if (form.confirmPassword !== form.initialPassword) problems.confirmPassword = 'Passwords do not match'
+  if (!isAdmin && !parentId) problems.parentId = 'Choose the parent account'
   const shown = (k: string) => fieldErrors[k] ?? (touched ? problems[k] : undefined)
 
   async function submit() {
@@ -241,7 +237,8 @@ function AddUserDialog({ onClose, onCreated }: { onClose: () => void; onCreated:
     setError(null)
     setFieldErrors({})
     try {
-      const { data } = await api.post<UserRow>('/users', { ...form, role, parentId })
+      const body = { ...form, confirmPassword: undefined }
+      const { data } = await api.post<UserRow>('/users', { ...body, role, parentId: isAdmin ? null : parentId })
       setCreated(data)
       onCreated()
     } catch (e) {
@@ -260,15 +257,15 @@ function AddUserDialog({ onClose, onCreated }: { onClose: () => void; onCreated:
         {created ? (
           <>
             <Alert severity="success">
-              {ROLE_LABELS[created.role]} <b>{created.displayName}</b> is active under {created.parentCode}.
+              {ROLE_LABELS[created.role]} <b>{created.displayName}</b> is active{created.parentCode ? ` under ${created.parentCode}` : ''}.
             </Alert>
             <Box component="dl" sx={{ m: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 2 }}>
               {([['User ID', created.accountCode], ['System ID', String(created.id)], ['Level', ROLE_LABELS[created.role]], ['Parent', created.parentCode ?? '–'], ['Sign-in username', form.username], ['Status', created.status]] as const).map(([k, v]) => (
                 <Box key={k}><Typography component="dt" variant="caption" color="text.secondary">{k}</Typography><Typography component="dd" sx={{ m: 0, fontWeight: 700 }}>{v}</Typography></Box>
               ))}
             </Box>
-            <Alert severity="info" action={<Button color="inherit" size="small" onClick={() => { void navigator.clipboard?.writeText(form.initialPassword); setCopied(true) }}>{copied ? 'Copied' : 'Copy password'}</Button>}>
-              Share the temporary password privately; it is not shown again. Ask them to change it after first sign-in.
+            <Alert severity="info">
+              Their role, username and password are being emailed to <b>{created.email}</b>. They sign in with their email or mobile and that password, then a one-time code. The password is stored only as a hash in the database.
             </Alert>
           </>
         ) : (
@@ -278,19 +275,25 @@ function AddUserDialog({ onClose, onCreated }: { onClose: () => void; onCreated:
                 helperText={`You can create: ${roles.map((r) => ROLE_LABELS[r]).join(', ')}`}>
                 {roles.map((r) => <MenuItem key={r} value={r}>{ROLE_LABELS[r]}</MenuItem>)}
               </TextField>
-              <TextField select required label="Parent account" value={parentId} onChange={(e) => setParentId(Number(e.target.value))} error={!!shown('parentId') && parents.length > 0}
-                helperText={parents.length === 0 ? `You need an active ${parentText(role)} first` : `A ${ROLE_LABELS[role]} belongs to a ${parentText(role)}`}>
-                {parents.map((p) => <MenuItem key={p.id} value={p.id}>{p.code} · {p.name} · {ROLE_LABELS[p.role]}{p.you ? ' (you)' : ''}</MenuItem>)}
-              </TextField>
+              {isAdmin ? (
+                <TextField label="Parent account" value="None (top of the hierarchy)" disabled helperText="A Platform Admin has no parent" />
+              ) : (
+                <TextField select required label="Parent account" value={parentId} onChange={(e) => setParentId(Number(e.target.value))} error={!!shown('parentId') && parents.length > 0}
+                  helperText={parents.length === 0 ? `You need an active ${parentText(role)} first` : `A ${ROLE_LABELS[role]} belongs to a ${parentText(role)}`}>
+                  {parents.map((p) => <MenuItem key={p.id} value={p.id}>{p.code} · {p.name} · {ROLE_LABELS[p.role]}{p.you ? ' (you)' : ''}</MenuItem>)}
+                </TextField>
+              )}
               <TextField required label="User ID" value={form.accountCode} onChange={set('accountCode')} error={!!shown('accountCode')} helperText={shown('accountCode') ?? 'Suggested automatically; you can change it'} />
               <TextField required label="Full name" value={form.displayName} onChange={set('displayName')} error={!!shown('displayName')} helperText={shown('displayName')} />
               <TextField required label="Mobile number" value={form.mobile} onChange={set('mobile')} placeholder="+919876543210" error={!!shown('mobile')} helperText={shown('mobile')} />
               <TextField required label="Email" type="email" value={form.email} onChange={set('email')} error={!!shown('email')} helperText={shown('email')} />
               <TextField label="Business name" value={form.businessName} onChange={set('businessName')} />
               <TextField required label="Sign-in username" value={form.username} onChange={set('username')} error={!!shown('username')} helperText={shown('username') ?? 'Letters, numbers, . - _'} />
-              <TextField required label="Temporary password" type={showPassword ? 'text' : 'password'} value={form.initialPassword} onChange={set('initialPassword')} error={!!shown('initialPassword')}
-                helperText={shown('initialPassword') ?? 'At least 12 characters. A random one is filled in for you.'} autoComplete="new-password"
-                slotProps={{ input: { endAdornment: <Button size="small" onClick={() => setShowPassword(!showPassword)}>{showPassword ? 'Hide' : 'Show'}</Button> } }} sx={{ gridColumn: { sm: '1 / -1' } }} />
+              <TextField required label="Password" type={showPassword ? 'text' : 'password'} value={form.initialPassword} onChange={set('initialPassword')} error={!!shown('initialPassword')}
+                helperText={shown('initialPassword') ?? 'At least 12 characters. Saved as a hash in the database.'} autoComplete="new-password"
+                slotProps={{ input: { endAdornment: <Button size="small" onClick={() => setShowPassword(!showPassword)}>{showPassword ? 'Hide' : 'Show'}</Button> } }} />
+              <TextField required label="Confirm password" type={showPassword ? 'text' : 'password'} value={form.confirmPassword} onChange={set('confirmPassword')} error={!!shown('confirmPassword')}
+                helperText={shown('confirmPassword')} autoComplete="new-password" />
             </Box>
 
             {parent && (
@@ -315,7 +318,7 @@ function AddUserDialog({ onClose, onCreated }: { onClose: () => void; onCreated:
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2.5 }}>
         <Button onClick={onClose} color="inherit" variant="outlined">{created ? 'Done' : 'Cancel'}</Button>
-        {!created && <Button onClick={submit} variant="contained" disabled={busy || parents.length === 0}>{busy ? 'Saving…' : 'Save user'}</Button>}
+        {!created && <Button onClick={submit} variant="contained" disabled={busy || (!isAdmin && parents.length === 0)}>{busy ? 'Saving…' : 'Save user'}</Button>}
       </DialogActions>
     </Dialog>
   )

@@ -10,5 +10,18 @@ public interface AgentAccountRepository extends JpaRepository<AgentAccount, Long
 
     boolean existsByAccountCode(String accountCode);
 
+    /** Emails are stored lower-case and mobiles as +91XXXXXXXXXX (see ContactNormalizer). */
+    Optional<AgentAccount> findByEmail(String email);
+
+    Optional<AgentAccount> findByMobile(String mobile);
+
+    boolean existsByEmailAndIdNot(String email, Long id);
+
+    boolean existsByMobileAndIdNot(String mobile, Long id);
+
+    boolean existsByEmail(String email);
+
+    boolean existsByMobile(String mobile);
+
     List<AgentAccount> findByParent_IdIn(Collection<Long> parentIds);
 }
